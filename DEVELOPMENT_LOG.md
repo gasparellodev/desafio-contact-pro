@@ -115,3 +115,29 @@ Formato:
 **Tempo gasto:** ~25 min
 
 **Smoke test:** `npm run build` → tsc strict OK, Vite build OK (22 KB CSS, 223 KB JS gzip 70 KB).
+
+---
+
+## 2026-04-25 11:15 — PR #4: docker-compose 5 services + .env.example
+
+**Decisões:**
+- 5 serviços: `db` (postgres:16-alpine), `redis` (redis:7-alpine, AOF on), `evolution` (evoapicloud/evolution-api:v2.3.7), `backend`, `frontend`.
+- Postgres compartilhado: schema `evolution_api` para Evolution + `public` para o backend (init SQL em `docker/postgres-init/00-create-schemas.sql`).
+- `depends_on` com `condition: service_healthy` (db, redis) — backend só sobe depois que infra está pronta.
+- Healthchecks reais em todos os serviços críticos (`pg_isready`, `redis-cli ping`, `wget` na Evolution, `curl` no backend).
+- `EVOLUTION_WEBHOOK_URL` aponta para `http://backend:8000/...` (rede interna do compose, não `localhost`).
+- Variáveis sensíveis sem default no compose (`AI_API_KEY`, `EVOLUTION_API_KEY`, etc.) — vêm do `.env`.
+
+**Dificuldades:**
+- Evolution v2 exige Postgres + Redis (validado na pesquisa); montar tudo em um único compose simplifica setup mas aumenta tempo de cold start (~30s).
+
+**Trade-offs:**
+- Volume `evolution_instances:/evolution/instances` persiste sessão Baileys. Documentar reset (`docker volume rm`) no README final.
+- Sem Nginx / TLS / proxy reverso — fora de escopo (challenge não exige).
+
+**Sugestões da IA rejeitadas/alteradas:**
+- IA inicial sugeriu `evoapicloud/evolution-api:latest`; ajustei para tag fixa `v2.3.7` (reprodutibilidade).
+
+**Tempo gasto:** ~15 min
+
+**Smoke test:** `docker compose config --quiet` → válido (warnings esperados sobre vars sem `.env`).
