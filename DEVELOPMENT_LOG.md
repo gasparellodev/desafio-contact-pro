@@ -308,3 +308,52 @@ Formato:
 **Tempo gasto:** ~30 min
 
 **Smoke test:** `npm run build` → tsc strict + Vite verde (302KB JS gzip 94KB).
+
+---
+
+## 2026-04-25 13:55 — PR #11: Audio in (Whisper STT)
+
+**Decisões:** OpenAITranscriber (`whisper-1`, language=pt). Orchestrator: download base64 → decode → transcribe → grava em `msg_in.transcription` → emit `audio.transcribed` → substitui `ai_input_text`.
+**Tempo:** ~15 min.
+
+---
+
+## 2026-04-25 14:10 — PR #12: Audio out (TTS opus → PTT)
+
+**Decisões:** OpenAITTS (`gpt-4o-mini-tts`, `response_format=opus`). Se input foi áudio, gera TTS, base64-encode e envia via `send_audio`. Fallback automático para texto se falhar.
+**Tempo:** ~15 min.
+
+---
+
+## 2026-04-25 14:25 — PR #13: Lead UI (entregue dentro do PR #10)
+
+LeadPanel + status pills + intent badges já estavam no PR #10. Marcado completo sem PR separado.
+
+---
+
+## 2026-04-25 14:30 — PR #14: Vision (imagens via multimodal)
+
+**Decisões:** `services/vision/multimodal.py:describe_image` chama o `AIProvider` ativo. Limite ~4MB. Orchestrator: detecta `MessageType.IMAGE`, baixa, descreve, grava como `transcription`, compõe `ai_input_text` com a descrição.
+**Dificuldades:** Edits intermediários falharam silenciosamente; recuperado via Read explícito.
+**Tempo:** ~15 min.
+
+---
+
+## 2026-04-25 14:45 — PR #15: Smart reactions (entregue no PR #9)
+
+`_reaction_for_status` no orchestrator já mapeia LeadStatus→emoji e é chamado ao final do pipeline. Marcado completo sem PR separado.
+
+---
+
+## 2026-04-25 14:55 — PR #16: README + AI Usage Report + docs final
+
+**Decisões:**
+- README final cobre **todas** as 17 seções obrigatórias do desafio (visão, stack, como rodar, env, conexão WhatsApp, sessão/reset, testar texto/áudio/imagem, providers, arquitetura, decisões, limitações, "o que faria com mais tempo", AI Usage Report, status checkbox).
+- `docs/architecture.md` com diagrama detalhado, pipeline canônica numerada, tabela de eventos Socket.IO, modelo de dados, provider switch.
+- `docs/usage.md` com pré-requisitos, smoke commands, exemplos de conversa, troca de provider, reset, logs, swagger.
+- `docs/decisions.md` com 12 ADRs leves (Evolution, Postgres compartilhado, VARCHAR enums, provider switch, Socket.IO, prompt cache, TTS opus, idempotência, history limit, shadcn-only, useReducer, StrictMode).
+- `AI Usage Report` consolidado a partir deste DEVELOPMENT_LOG.
+
+**Tempo:** ~25 min.
+
+**Smoke test final:** `docker compose config --quiet` ✓; `cd backend && uv run python -c "from app.main import app"` ✓; `cd frontend && npm run build` ✓.
