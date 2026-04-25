@@ -697,3 +697,34 @@ docker compose up -d --build frontend
 ```
 
 **Tempo:** ~45min.
+
+---
+
+## 2026-04-25 18:50 — PR #58 / Issue #57: README walkthrough completo para recrutador
+
+**Contexto:** depois do Spec A + fix do connection state, faltava polish nos READMEs para recrutador clonar e rodar tudo do zero. `README.md` raiz era pré-Spec A; `frontend/README.md` ainda era boilerplate Vite; `backend/README.md` não existia.
+
+**Decisões:**
+- **`README.md` raiz** (366 linhas, +72 vs antes):
+  - Visão geral atualizada com rotas deep-linkáveis, persistência REST+Socket.IO, suíte de testes 73, cobertura 80%+.
+  - Stack ganha React Router 7, TanStack Query 5, Vitest 4 + axe-core.
+  - Nova seção "Pré-requisitos" explícita (Docker Desktop ≥24 obrigatório; Node ≥20 + uv ≥0.5 opcional).
+  - "Como rodar em 5 minutos" reformulado, com `ADMIN_API_TOKEN` agora explícito.
+  - Nova subseção "Deep-link e persistência" explicando o fluxo REST+Socket.IO.
+  - **Nova seção dedicada "Como rodar os testes"** com cmds completos para backend (`uv run pytest tests/ -v`) e frontend (`npm run test`/`test:coverage`).
+  - **Nova seção "Troubleshooting"** com 7 sintomas mapeados (badge `wa:unknown`, QR não aparece, mensagem não chega, 401 unauthorized, 502 evolution, conflito de porta, pytest falha).
+  - "Limitações" atualizada: removido "sem testes automatizados" (agora tem 73), removido "sem persistência" (agora tem REST + URL).
+  - "O que faria com mais tempo" menciona Spec B (testes backend completos) e Spec C (CI/CD + Playwright).
+  - "Status do desafio" ganha 7 checkboxes novos: responsivo, persistência, suíte de testes, a11y axe, code splitting, ErrorBoundary, workflow issue/PR/squash merge.
+- **`frontend/README.md`** (73 linhas, substitui o boilerplate Vite): stack, scripts, "Como rodar localmente sem Docker", arquitetura, convenção de testes co-located + axe + thresholds.
+- **`backend/README.md`** (86 linhas, novo): stack, "Como rodar localmente sem Docker", "Como rodar testes" (com requisito Docker para testcontainers), tabela "Como adicionar..." (endpoint/schema/service/model/teste) com links pros CLAUDE.md específicos.
+
+**Trade-offs:**
+- READMEs por módulo (`frontend/`, `backend/`) ficaram intencionalmente curtos (≤90 linhas) — apontam pro README raiz pra setup global e pros `CLAUDE.md` pra convenções detalhadas. Evita duplicação de instrução que envelhece sem aviso.
+- "Resetar a sessão WhatsApp" continua manual via `docker volume rm` (UI de logout fica fora do escopo).
+
+**Smoke (mental walkthrough do recrutador):**
+1. Clone → 2. `cp .env.example .env` + 1 chave OpenAI **ou** Anthropic + ADMIN_API_TOKEN → 3. `docker compose up --build` → < 30s tudo healthy → 4. http://localhost:5173 → 5. "Inicializar instância" → 6. QR escaneado → 7. Mensagem WhatsApp → aparece em tempo real, intent classificado, lead extraído.
+Para testes: `cd backend && uv sync && uv run pytest tests -v` (~5s) + `cd frontend && npm install && npm run test` (~4s).
+
+**Tempo:** ~30min.

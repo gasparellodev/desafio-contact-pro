@@ -1,10 +1,10 @@
 # Desafio Contact Pro — Chatbot WhatsApp + IA
 
-Chatbot WhatsApp com IA para atendimento inicial de leads da **Contact Pro**, com frontend web em tempo real, suporte a **texto, áudio e imagem**, qualificação automática e classificação de intenção.
+Chatbot WhatsApp com IA para atendimento inicial de leads da **Contact Pro**, com inbox web em tempo real **responsiva** (mobile/tablet/desktop), suporte a **texto, áudio e imagem**, qualificação automática e classificação de intenção. Frontend com **rotas deep-linkáveis** (`/conversations/:id` sobrevive ao reload), **suíte de testes** (73 testes — 23 backend + 50 frontend) e **cobertura ≥80%**.
 
 > **Spec do desafio:** [`desafio-tecnico.md`](./desafio-tecnico.md).
 > **Diário de desenvolvimento:** [`DEVELOPMENT_LOG.md`](./DEVELOPMENT_LOG.md) (alimenta o AI Usage Report).
-> **Convenções para agentes:** [`CLAUDE.md`](./CLAUDE.md) e os `CLAUDE.md` por módulo.
+> **Convenções para agentes:** [`CLAUDE.md`](./CLAUDE.md) e os `CLAUDE.md` por módulo (backend, frontend, services, models, hooks, components).
 
 ---
 
@@ -19,6 +19,7 @@ O sistema:
 5. Atualiza dados do lead (nome, empresa, intenção, status `new|qualified|needs_human|opt_out`) automaticamente.
 6. Responde **em texto** (com `quoted` na mensagem original) ou **em áudio** TTS opus (quando o input foi áudio).
 7. Aplica **reactions inteligentes**: 👍 ao receber, ✅ qualified, 👌 opt_out, 🤝 needs_human, ⚠️ erro.
+8. **Frontend hidrata via REST** (`GET /api/conversations`, `/api/leads/{id}`, `/api/whatsapp/connection`) no mount; **Socket.IO mescla deltas** no cache do TanStack Query — F5 mantém a conversa aberta; mensagens novas aparecem em tempo real sem refetch.
 
 ---
 
@@ -36,14 +37,23 @@ O sistema:
 | Cache | Redis 7 (exigido pelo Evolution v2) |
 | Real-time | python-socketio 5.16.x (ASGI root) + socket.io-client 4.8.x |
 | Frontend | Vite 8 + React 19.2 + Tailwind v4 (`@tailwindcss/vite`) + shadcn/ui (OKLCH) |
+| Routing | React Router 7 (`createBrowserRouter`, code splitting) |
+| Server cache | TanStack Query 5 (`useQuery` + `setQueryData` para deltas Socket.IO) |
+| Tests backend | pytest 8 + pytest-asyncio + testcontainers Postgres 16 + httpx ASGITransport |
+| Tests frontend | Vitest 4 + Testing Library 16 + jsdom 29 + axe-core 4 |
 | HTTP | httpx ≥0.27 + tenacity ≥9 |
 
 ---
 
-## Como rodar (Docker Compose)
+## Pré-requisitos
+
+- **Docker Desktop ≥ 24** (única dependência obrigatória — sobe os 5 containers).
+- *(Opcional, para rodar testes localmente sem container)*: **Node ≥ 20** + **uv ≥ 0.5** (`pip install uv`).
+
+## Como rodar em 5 minutos (Docker Compose)
 
 ```bash
-git clone https://github.com/<your-user>/desafio-contact-pro.git
+git clone https://github.com/gasparellodev/desafio-contact-pro.git
 cd desafio-contact-pro
 
 cp .env.example .env
@@ -51,6 +61,7 @@ cp .env.example .env
 #   OPENAI_API_KEY=sk-...                  (obrigatório se AI_PROVIDER=openai e para STT/TTS/vision)
 #   ANTHROPIC_API_KEY=sk-ant-...           (obrigatório se AI_PROVIDER=anthropic)
 #   EVOLUTION_API_KEY=qualquer-string-aqui (será o seu apikey do Evolution)
+#   ADMIN_API_TOKEN=qualquer-string-aqui   (protege endpoints REST + UI; também vai pra VITE_ADMIN_TOKEN)
 #   AI_API_KEY=                            (fallback usado quando faltar a explícita)
 
 docker compose up --build
@@ -68,9 +79,11 @@ Sobem 5 serviços:
 
 Acesse:
 
-- Frontend: <http://localhost:5173>
+- Frontend: <http://localhost:5173> — redireciona para `/conversations`. Deep-links como `/conversations/<uuid>` sobrevivem a reload.
 - Swagger da API: <http://localhost:8000/docs>
-- Health-check: <http://localhost:8000/health>
+- Health-check: <http://localhost:8000/health> — retorna `ok`/`degraded` com status de DB, Redis e Evolution.
+
+Em < 30s após `docker compose up`, todos os 5 containers ficam **healthy**.
 
 ---
 
@@ -127,6 +140,42 @@ docker compose up
 2. `docker compose restart backend`.
 3. A próxima mensagem usa o Claude com `tool_choice` forçado e prompt cache.
 
+### Deep-link e persistência
+
+- Cada conversa tem URL única: `/conversations/<uuid>`.
+- F5 mantém a conversa aberta — frontend recarrega via `GET /api/conversations/{id}/messages` (REST) e Socket.IO reconecta para deltas em tempo real.
+- Mensagens novas aparecem **sem refetch**: backend emite `wa.message.received`, `SocketProvider` chama `queryClient.setQueryData(...)` para mesclar.
+
+---
+
+## Como rodar os testes
+
+A suíte total: **73 testes** (23 backend + 50 frontend) em ~10s combinado.
+
+### Backend (pytest + testcontainers)
+
+```bash
+cd backend
+uv sync                        # instala deps (~10s na 1ª vez)
+uv run pytest tests/ -v        # 23 testes, ~5s (testcontainers spin-up Postgres)
+uv run pytest --cov=app/schemas --cov-report=term-missing   # cobertura dos schemas
+```
+
+> **Requisito:** Docker rodando (testcontainers sobe um Postgres 16-alpine isolado).
+
+### Frontend (Vitest + RTL + axe-core)
+
+```bash
+cd frontend
+npm install                    # ~5s na 1ª vez
+npm run test                   # 50 testes, ~3s
+npm run test:coverage          # 85% statements / 67% branches / 87% functions / 91% lines
+npm run typecheck              # tsc strict
+npm run lint                   # eslint, zero erros
+```
+
+Testes co-located (`Component.test.tsx` ao lado de `Component.tsx`); a11y validada com `axe-core` em componentes críticos (zero violations).
+
 ---
 
 ## Provider/modelo de IA usado
@@ -181,17 +230,32 @@ Resumo no [`docs/decisions.md`](./docs/decisions.md). Os principais:
 
 ---
 
-## Limitações conhecidas (decisões conscientes para o prazo de 6h)
+## Limitações conhecidas (decisões conscientes para o prazo)
 
-- Sem autenticação / login na UI (app local).
+- Sem autenticação de **usuário** (app é admin-only; endpoints exigem `X-Admin-Token`).
 - Apenas **uma instância** WhatsApp por vez.
-- Orchestrator inline, **sem fila assíncrona** (Celery/RQ não cabe em 6h).
+- Orchestrator inline, **sem fila assíncrona** (Celery/RQ ficou fora do prazo).
 - Knowledge base **estática** (sem RAG com embeddings).
-- Sem autorização HMAC/assinatura nos webhooks (Evolution v2 não envia; defesa é `apikey` opcional + rede interna).
-- **Sem testes automatizados** completos (apenas smoke por import e build verificados a cada PR).
+- Sem autorização HMAC/assinatura nos webhooks (Evolution v2 não envia; defesa é `apikey` obrigatório + rede interna).
 - Sem TLS / Nginx / deploy cloud — `docker compose up` é o suficiente.
 - Histórico da IA capado em 12 mensagens (`HISTORY_LIMIT`).
 - `_apply_extracted_to_lead` não sobrescreve campos existentes (lead que muda nome em conversas futuras não atualiza).
+- Cobertura backend (23 testes) cobre os endpoints REST de leitura — orchestrator/AI providers/Evolution client ainda dependem de smoke manual (Spec B do plano cobre isso).
+- E2E cross-stack ainda manual — Playwright fica para Spec C (CI/CD).
+
+---
+
+## Troubleshooting
+
+| Sintoma | Causa | Como resolver |
+|---|---|---|
+| Badge `wa: unknown` no header | Resolvido pelo PR #56 — frontend hidrata via `/api/whatsapp/connection` no mount. Se ainda aparecer, `docker compose restart backend` (o proxy backend → Evolution pode estar fora do ar). | — |
+| QR Code não aparece | Instância já existe (status `connecting`) ou Evolution ainda subindo. Aguarde 30s; clique novamente. Para reset completo, ver "Resetar a sessão WhatsApp". | — |
+| Mensagem não chega no UI | Webhook não configurado. Re-clique "Inicializar instância" (configura webhook idempotente) ou cheque `docker compose logs backend \| grep webhook`. | — |
+| `401 unauthorized` na UI | `ADMIN_API_TOKEN` não preenchido em `.env` ou `VITE_ADMIN_TOKEN` no frontend não bate. Rebuild: `docker compose up -d --build frontend`. | — |
+| `502 evolution unreachable` no console | Evolution está fora do ar. `docker compose ps evolution` e logs. UI degrada para `wa: unknown` (não quebra). | — |
+| Backend não sobe (`Waiting → Recreate → Restarting`) | Conflito de porta. `docker ps` para ver quem usa 8000/5432/6379/8080. Mude `APP_PORT`/`POSTGRES_HOST_PORT`/`REDIS_HOST_PORT` no `.env`. | — |
+| Pytest falha com `cannot connect to Docker` | Docker Desktop não está rodando — testcontainers precisa dele. | — |
 
 ---
 
@@ -199,12 +263,13 @@ Resumo no [`docs/decisions.md`](./docs/decisions.md). Os principais:
 
 - **RAG real** com embeddings da KB Contact Pro (Postgres + pgvector ou Chroma).
 - **Fila assíncrona** (Celery + Redis ou Vercel Queues) para webhooks → workers.
-- **Testes E2E** com pytest + httpx ASGITransport + WebSocket de teste.
+- **Spec B**: suíte completa de testes backend (factories factory-boy, mocks `respx` para Evolution/OpenAI/Anthropic, `fakeredis`, testcontainers já em uso).
+- **Spec C**: CI/CD GitHub Actions (lint + typecheck + pytest + vitest + cobertura) + Playwright cross-stack contra docker-compose real.
 - **Rate limiting** no webhook + assinatura HMAC opcional.
 - **Multi-instância** WhatsApp.
 - **Observabilidade**: Sentry + métricas Prometheus (latência por etapa do pipeline).
 - **Audit log** de todas as ações IA → lead (para review humano).
-- UI: dark mode toggle, virtualização do `MessageList`, busca de conversas.
+- UI: dark mode toggle, virtualização do `MessageList`, busca de conversas, scroll-up infinito de mensagens (`useInfiniteQuery` com cursor `(before, before_id)`).
 - Migrar Evolution para integração direta com Baileys/whatsmeow (cumpre estritamente "biblioteca").
 
 ---
@@ -292,3 +357,10 @@ Resumo no [`docs/decisions.md`](./docs/decisions.md). Os principais:
 - [x] Qualificação de lead + intenção visíveis na UI
 - [x] Reactions inteligentes por status
 - [x] Documentação final + AI Usage Report
+- [x] **Frontend responsivo mobile-first** (Sheet shadcn em mobile/tablet, 3 colunas em desktop)
+- [x] **Persistência de contexto no reload** (URL = fonte da verdade do `activeId` + REST hidrata + Socket.IO mescla)
+- [x] **Suíte de testes** (23 backend pytest + 50 frontend Vitest, 73 total) com cobertura ≥80% statements
+- [x] **A11y validado com axe-core** em componentes críticos (zero violations)
+- [x] **Code splitting por rota** (initial bundle gzip ~125KB)
+- [x] **ErrorBoundary global** com UI de fallback
+- [x] **Workflow de issue → branch → PR → squash merge** com Conventional Commits, atualização de CLAUDE.md e DEVELOPMENT_LOG por PR
