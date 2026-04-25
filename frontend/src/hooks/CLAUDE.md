@@ -18,7 +18,8 @@
 | `useConversationsQuery(filters?)` | Lista de conversas via REST. SocketProvider invalida quando chega mensagem (reordenar por last_message_at). |
 | `useConversationMessages(id?)` | Página de mensagens de uma conversa via REST. SocketProvider mescla mensagens novas via `setQueryData`. |
 | `useLead(id?)` | Detalhe completo do Lead via REST. SocketProvider atualiza via `lead.updated`. |
-| `useConnectionStatus()` | Re-export fino do `useSocketContext()` — `{ state, qrcode }` para WhatsApp connection state. |
+| `useWhatsAppConnection()` | Estado da conexão WhatsApp via REST (`/api/whatsapp/connection`) com polling backup de 60s. SocketProvider faz `setQueryData` quando chega `wa.connection.update` para resposta imediata. |
+| `useConnectionStatus()` | Merge: `state` vem do `useWhatsAppConnection()` query (REST + socket), `qrcode` vem do `useSocketContext()` (evento puro). Retorna `{state, qrcode, isLoading}`. |
 
 ## Não fazer
 

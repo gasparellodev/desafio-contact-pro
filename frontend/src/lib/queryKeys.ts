@@ -23,3 +23,8 @@ export const leadKeys = {
   all: ['leads'] as const,
   detail: (id: string) => [...leadKeys.all, 'detail', id] as const,
 }
+
+export const whatsappKeys = {
+  all: ['whatsapp'] as const,
+  connection: () => [...whatsappKeys.all, 'connection'] as const,
+}

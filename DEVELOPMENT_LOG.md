@@ -659,3 +659,41 @@ curl -s http://localhost:5173/conversations/abc-123    # HTTP 200 (SPA fallback)
 ```
 
 **Tempo:** ~60min.
+
+---
+
+## 2026-04-25 18:30 — PR #56 / Issue #55: fix do badge wa: unknown via fetch inicial + polling backup
+
+**Contexto:** bug visível pós-Spec A: badge `wa:` no header mostra `unknown` mesmo com instância pareada (`state: open` na Evolution). Causa: o evento Socket.IO `wa.connection.update` só dispara em MUDANÇA de estado; se a página carrega depois, nunca vê o evento.
+
+**Decisões:**
+- Novo `useWhatsAppConnection` (TanStack Query) em `hooks/useWhatsAppConnection.ts` consumindo `/api/whatsapp/connection` com `refetchInterval: 60_000` (backup contra eventos perdidos).
+- `lib/api.ts` ganha `fetchWhatsAppConnection()` que **achata** o nested `{instance:{state}}` da Evolution v2 para `{state}` plano e degrada graciosamente para `{state: 'unknown'}` em 502 (`evolution unreachable`) — UX prefere "estado indeterminado" a quebrar a UI inteira. Validação contra a allow-list de estados (`open`/`connecting`/`close`/`unknown`) — qualquer valor desconhecido também cai pra `unknown`.
+- `lib/queryKeys.ts` ganha `whatsappKeys` factory.
+- `hooks/useConnectionStatus.ts` refatorado: agora **mescla** query (state) + socket-context (qrcode). Retorna `{state, qrcode, isLoading}`.
+- `providers/SocketProvider.tsx` no handler de `wa.connection.update` adiciona `queryClient.setQueryData(whatsappKeys.connection(), {state: data.state})` em paralelo ao `setWaState` existente. UI reage imediato a evento socket E ao polling backup.
+- `types/domain.ts` ganha `WhatsAppConnectionResponse`.
+- 8 testes novos (49 total agora):
+  - `useWhatsAppConnection.test.tsx`: chama URL correto, parsea `{instance:{state}}`, aceita `{state}` no topo, fallback `unknown` em 502, fallback em valor desconhecido.
+  - `useConnectionStatus.test.tsx`: loading inicial, state do cache, reage a updates do cache, qrcode vem do socket-context.
+  - `SocketProvider.test.tsx`: novo caso testando que `wa.connection.update` escreve no `whatsappKeys.connection()` cache.
+
+**Trade-offs:**
+- Mantive `setWaState` no SocketProvider em paralelo ao `setQueryData` — `useSocketContext().waState` ainda é exposto pra eventual consumidor que use Context direto. Refator final pra mover 100% pro query fica para uma PR específica (footprint menor agora).
+- Polling de 60s é conservador — 30s daria reação mais rápida a desync, 120s seria mais leve. Escolhi 60s como meio-termo razoável; trivial ajustar.
+
+**Smoke test:**
+```bash
+cd frontend
+npm run typecheck    # OK
+npm run lint         # 0 erros
+npm run test         # 49/49 passing in ~4s
+npm run test:coverage # 85.4% / 67% / 87.5% / 91.2% (acima dos thresholds 80/60/80/80)
+npm run build        # initial 400KB / gzip 126KB
+
+docker compose up -d --build frontend
+# Browser http://localhost:5173/
+# Recarregar (com instância pareada): badge "wa: open" aparece em < 1s.
+```
+
+**Tempo:** ~45min.

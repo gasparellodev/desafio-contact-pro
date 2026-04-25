@@ -2,10 +2,12 @@
 // (ver hooks/use*.ts).
 
 import type {
+  ConnectionState,
   ConversationDetail,
   ConversationListResponse,
   Lead,
   MessagePageResponse,
+  WhatsAppConnectionResponse,
 } from '@/types/domain'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
@@ -85,4 +87,31 @@ export async function fetchMessages(
 
 export async function fetchLead(id: string): Promise<Lead> {
   return api<Lead>(`/api/leads/${id}`)
+}
+
+/** Estado da conexão WhatsApp via backend proxy → Evolution.
+ *
+ * Evolution v2 devolve `{ instance: { instanceName, state } }`. Achatamos para
+ * `{ state }` e tratamos 502 (proxy retorna `evolution unreachable`) como
+ * `unknown` em vez de propagar o erro — UX prefere "estado indeterminado"
+ * a quebrar a UI inteira.
+ */
+export async function fetchWhatsAppConnection(): Promise<WhatsAppConnectionResponse> {
+  const KNOWN_STATES: readonly ConnectionState[] = ['open', 'connecting', 'close', 'unknown']
+  try {
+    const raw = await api<{ instance?: { state?: string } } & { state?: string }>(
+      '/api/whatsapp/connection'
+    )
+    const candidate = raw?.instance?.state ?? raw?.state
+    const state = KNOWN_STATES.includes(candidate as ConnectionState)
+      ? (candidate as ConnectionState)
+      : 'unknown'
+    return { state }
+  } catch (err) {
+    // Evolution fora do ar (proxy 502) ou rede caiu — não quebra a UI.
+    if (err instanceof Error && err.message.startsWith('502')) {
+      return { state: 'unknown' }
+    }
+    throw err
+  }
 }

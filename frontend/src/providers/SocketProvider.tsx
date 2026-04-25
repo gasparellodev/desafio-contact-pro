@@ -16,7 +16,7 @@
 import { useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
-import { conversationKeys, leadKeys } from '@/lib/queryKeys'
+import { conversationKeys, leadKeys, whatsappKeys } from '@/lib/queryKeys'
 import { socket } from '@/lib/socket'
 import type {
   ConnectionState,
@@ -107,7 +107,13 @@ export function SocketProvider({ children }: SocketProviderProps) {
     const onConnect = () => setConnected(true)
     const onDisconnect = () => setConnected(false)
     const onWaConnection = (data: { state: ConnectionState }) => {
+      // Atualiza tanto o state local (consumido por widgets via context) quanto
+      // o cache do TanStack Query (fonte da verdade que `useConnectionStatus`
+      // lê via `useWhatsAppConnection`). Isso garante que viewers existentes
+      // continuam funcionando E que o badge do header reage imediato sem
+      // esperar refetch.
       setWaState(data.state)
+      queryClient.setQueryData(whatsappKeys.connection(), { state: data.state })
       if (data.state === 'open') setQrcode(null)
     }
     const onQr = (data: { qrcode: string | null }) => setQrcode(data.qrcode)

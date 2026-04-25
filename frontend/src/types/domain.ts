@@ -107,3 +107,11 @@ export interface MessagePageResponse {
   next_before_id: string | null
   limit: number
 }
+
+/** Resposta normalizada do backend `/api/whatsapp/connection`.
+ * Internamente Evolution v2 devolve `{ instance: { state } }`; o fetcher
+ * achata para esta forma plana antes de cachear.
+ */
+export interface WhatsAppConnectionResponse {
+  state: ConnectionState
+}

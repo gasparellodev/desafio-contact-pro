@@ -1,20 +1,31 @@
 /**
- * Re-export das infos de conexão a partir do SocketProvider.
+ * Estado da conexão WhatsApp + QR Code para a UI.
  *
- * Antes da Phase 2, este hook fazia `socket.on(...)` direto. Agora o
- * SocketProvider centraliza handlers e expõe via Context — evita N
- * subscribers para o mesmo evento.
+ * `state` vem do TanStack Query (REST + atualizações Socket.IO mescladas no
+ * cache pelo `SocketProvider`). Enquanto a primeira request está em voo,
+ * devolve `unknown` + `isLoading: true` — UX prefere placeholder a flicker.
+ *
+ * `qrcode` continua vindo do `useSocketContext()` (é evento puro, sem
+ * cache REST).
  */
 
 import { useSocketContext } from '@/providers/socket-context'
 import type { ConnectionState } from '@/types/domain'
 
+import { useWhatsAppConnection } from './useWhatsAppConnection'
+
 interface ConnectionInfo {
   state: ConnectionState
   qrcode: string | null
+  isLoading: boolean
 }
 
 export function useConnectionStatus(): ConnectionInfo {
-  const { waState, qrcode } = useSocketContext()
-  return { state: waState, qrcode }
+  const { qrcode } = useSocketContext()
+  const { data, isLoading } = useWhatsAppConnection()
+  return {
+    state: data?.state ?? 'unknown',
+    qrcode,
+    isLoading,
+  }
 }
