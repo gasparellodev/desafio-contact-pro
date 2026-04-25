@@ -167,3 +167,34 @@ Formato:
 **Tempo gasto:** ~15 min
 
 **Smoke test:** `from app.db.base import *` — 3 tabelas, todas as colunas e enums batem com a spec do desafio.
+
+---
+
+## 2026-04-25 11:45 — PR #6: Evolution API client + webhook receiver
+
+**Decisões:**
+- `EvolutionClient` com `httpx.AsyncClient` (header `apikey:` no construtor — única fonte) + `tenacity` para retries em 5xx/429/transport errors. 4xx é definitivo (sem retry).
+- 8 métodos cobrindo: instance create/connect/state/logout, webhook set, sendText (com `quoted` para reply), sendWhatsAppAudio (Evolution converte via ffmpeg interno), sendReaction, downloadMediaBase64.
+- `payload.py` com `parse_messages_upsert(payload)` extraindo `key.id`, `remoteJid`, `messageType`, texto/mídia base64 — neutraliza variações de nome de evento (`messages.upsert` vs `MESSAGES_UPSERT`) via `normalize_event`.
+- `app/api/routes/webhooks.py` POST `/api/webhooks/evolution` é o único endpoint de entrada do WhatsApp; valida `apikey` opcionalmente, despacha para handlers e emite `wa.message.received.raw` / `wa.connection.update` / `wa.qrcode.updated` no Socket.IO.
+- `app/api/routes/whatsapp.py` proxy REST para frontend pegar QR/status e disparar setup do webhook.
+
+**Dificuldades:**
+- Tipo do evento da Evolution v2 varia: alguns deploys mandam `messages.upsert`, outros `MESSAGES_UPSERT`. Resolvi via `normalize_event` que tolera ambos.
+- Sem Postgres rodando local, não dá para testar fluxo end-to-end agora — smoke test só valida que rotas estão registradas. Validação real virá no compose-up.
+
+**Trade-offs:**
+- O webhook deste PR ainda não chama o orchestrator (chega no PR #9). Por ora ele só emite snapshot raw para o Socket.IO — útil para debug do frontend antes do orchestrator estar pronto.
+- Singleton do `EvolutionClient` é instanciado on-demand (`get_evolution_client()`); não está no lifespan ainda. Em produção, mover para lifespan + fechar no shutdown — TODO documentado.
+
+**Sugestões da IA rejeitadas/alteradas:**
+- IA inicial sugeriu validação de assinatura HMAC do webhook. Evolution v2 não envia assinatura no header — a única defesa é a `apikey` (opcional) e a topologia de rede interna do Docker. Documentado.
+
+**Tempo gasto:** ~25 min
+
+**Smoke test:** `uv run python -c "from app.main import fastapi_app"` — 6 rotas registradas (`/health`, `/api/webhooks/evolution`, `/api/whatsapp/*`).
+
+**Pendente para `/security-review`:**
+- Webhook autorização (apenas `apikey` opcional + rede interna)
+- Sanitização do `remote_jid` antes de logar (PII)
+- Limite de tamanho do body (`fastapi` default é sem limite)
