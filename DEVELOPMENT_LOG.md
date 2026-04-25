@@ -357,3 +357,15 @@ LeadPanel + status pills + intent badges já estavam no PR #10. Marcado completo
 **Tempo:** ~25 min.
 
 **Smoke test final:** `docker compose config --quiet` ✓; `cd backend && uv run python -c "from app.main import app"` ✓; `cd frontend && npm run build` ✓.
+
+---
+
+## 2026-04-25 14:50 — PR de follow-up A: críticos do security review (#31, #32) + body cap (#34)
+
+**Decisões:**
+- **#31** (apikey bypassável): header obrigatório; `hmac.compare_digest` para timing-safe; sem chave configurada → 503.
+- **#32** (race em idempotência): `try/except IntegrityError` no commit da Message IN; duplicata silenciosa via UNIQUE.
+- **#34** (body cap): guard de Content-Length 25 MB → 413 quando excede.
+- Bonus: response do orchestrator não vaza `str(exc)`; helper `_mask_jid` para PII em logs.
+
+**Tempo:** ~15 min.

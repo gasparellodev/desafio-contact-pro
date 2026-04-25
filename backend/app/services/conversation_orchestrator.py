@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.socketio import emit_global, emit_to_conversation
@@ -183,7 +184,10 @@ class ConversationOrchestrator:
         lead = await self._upsert_lead(jid=parsed.remote_jid, push_name=parsed.push_name)
         conv = await self._upsert_conversation(lead)
 
-        # 3. persist IN
+        # 3. persist IN — protege contra race entre `_exists_message` e o INSERT.
+        # Dois webhooks concorrentes podem passar pelo check; o segundo levanta
+        # IntegrityError no UNIQUE de whatsapp_message_id e tratamos como duplicata
+        # silenciosa (mesma semântica do passo 1). Issue #32.
         msg_in = Message(
             conversation_id=conv.id,
             whatsapp_message_id=parsed.whatsapp_message_id,
@@ -194,7 +198,15 @@ class ConversationOrchestrator:
             status=MessageStatus.RECEIVED,
         )
         self.session.add(msg_in)
-        await self.session.commit()
+        try:
+            await self.session.commit()
+        except IntegrityError:
+            await self.session.rollback()
+            logger.info(
+                "orchestrator_duplicate_race",
+                extra={"id": parsed.whatsapp_message_id},
+            )
+            return
         await self.session.refresh(msg_in)
         await emit_to_conversation(
             str(conv.id), "wa.message.received", _msg_to_dict(msg_in)
