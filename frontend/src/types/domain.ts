@@ -42,6 +42,7 @@ export interface Lead {
   lead_goal: string | null
   estimated_volume: string | null
   status: LeadStatus
+  bot_paused: boolean
   created_at: string
   updated_at: string
 }
@@ -82,6 +83,7 @@ export interface LeadSummary {
   phone: string | null
   service_interest: ServiceInterest
   status: LeadStatus
+  bot_paused: boolean
 }
 
 export interface ConversationListItem {

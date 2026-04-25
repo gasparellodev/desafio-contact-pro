@@ -114,6 +114,15 @@ export function ConversationList({ items, activeId, onSelect }: Props) {
                   <Badge variant={statusBadgeVariant[lead.status]} className="text-[10px]">
                     {statusLabel[lead.status]}
                   </Badge>
+                  {lead.bot_paused && (
+                    <Badge
+                      variant="warning"
+                      className="font-mono text-[9px] uppercase tracking-wider"
+                      aria-label="Bot pausado — aguardando humano"
+                    >
+                      ⚑ pausado
+                    </Badge>
+                  )}
                 </div>
               </div>
             </button>

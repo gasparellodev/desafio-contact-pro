@@ -16,6 +16,7 @@ const lead: Lead = {
   lead_goal: 'aumentar conversão',
   estimated_volume: '10k leads/mês',
   status: 'qualified',
+  bot_paused: false,
   created_at: '2026-04-25T14:00:00Z',
   updated_at: '2026-04-25T15:00:00Z',
 }

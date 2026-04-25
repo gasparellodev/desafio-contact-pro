@@ -20,6 +20,8 @@
 | `useLead(id?)` | Detalhe completo do Lead via REST. SocketProvider atualiza via `lead.updated`. |
 | `useWhatsAppConnection()` | Estado da conexão WhatsApp via REST (`/api/whatsapp/connection`) com polling backup de 60s. SocketProvider faz `setQueryData` quando chega `wa.connection.update` para resposta imediata. |
 | `useConnectionStatus()` | Merge: `state` vem do `useWhatsAppConnection()` query (REST + socket), `qrcode` vem do `useSocketContext()` (evento puro). Retorna `{state, qrcode, isLoading}`. |
+| `useResumeBot()` | Mutation `POST /api/leads/{id}/resume-bot`. Em sucesso atualiza `leadKeys.detail(id)` no cache + invalida lista. Usado pelo botão "Retomar bot" no `ConversationHeader`. |
+| `useSendManualMessage()` | Mutation `POST /api/conversations/{id}/messages`. Sem optimistic update — Socket.IO `wa.message.sent` mescla a Message OUT no cache. Usado pelo `ManualMessageInput` quando bot está pausado. |
 
 ## Não fazer
 

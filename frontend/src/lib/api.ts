@@ -6,6 +6,7 @@ import type {
   ConversationDetail,
   ConversationListResponse,
   Lead,
+  Message,
   MessagePageResponse,
   WhatsAppConnectionResponse,
 } from '@/types/domain'
@@ -87,6 +88,24 @@ export async function fetchMessages(
 
 export async function fetchLead(id: string): Promise<Lead> {
   return api<Lead>(`/api/leads/${id}`)
+}
+
+export async function resumeBot(leadId: string): Promise<Lead> {
+  return api<Lead>(`/api/leads/${leadId}/resume-bot`, { method: 'POST' })
+}
+
+export interface ManualMessageInput {
+  conversationId: string
+  content: string
+}
+
+export async function sendManualMessage(
+  input: ManualMessageInput
+): Promise<Message> {
+  return api<Message>(`/api/conversations/${input.conversationId}/messages`, {
+    method: 'POST',
+    body: JSON.stringify({ content: input.content }),
+  })
 }
 
 /** Estado da conexão WhatsApp via backend proxy → Evolution.
