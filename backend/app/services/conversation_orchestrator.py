@@ -169,6 +169,378 @@ class ConversationOrchestrator:
         return turns
 
     # ----- main pipeline -----
+    # Webhook real (após D.2) usa `persist_incoming` + buffer Redis enqueue;
+    # worker async consome com `process_pending` agregando N mensagens em 1
+    # chamada de IA. `handle_incoming` mantido como entry-point legado pra
+    # testes e scripts single-message.
+
+    async def persist_incoming(self, parsed: ParsedMessage) -> Message | None:
+        """Steps 1-5: idempotência, upsert lead/conv, persist Message IN,
+        emit `wa.message.received`, reaction 👍, skip-when-paused, STT/vision.
+
+        Retorna a `Message` persistida (com `transcription` se áudio/imagem)
+        ou `None` se descartada (from_me / duplicata / lead pausado). Worker
+        do buffer enfileira o id retornado pra processar batched.
+        """
+        if parsed.from_me:
+            return None
+
+        if await self._exists_message(parsed.whatsapp_message_id):
+            logger.info(
+                "orchestrator_duplicate_ignored", extra={"id": parsed.whatsapp_message_id}
+            )
+            return None
+
+        lead = await self._upsert_lead(jid=parsed.remote_jid, push_name=parsed.push_name)
+        conv = await self._upsert_conversation(lead)
+
+        msg_in = Message(
+            conversation_id=conv.id,
+            whatsapp_message_id=parsed.whatsapp_message_id,
+            direction=Direction.IN,
+            type=parsed.message_type,
+            content=parsed.text,
+            media_mime=parsed.media_mime,
+            status=MessageStatus.RECEIVED,
+        )
+        self.session.add(msg_in)
+        try:
+            await self.session.commit()
+        except IntegrityError:
+            await self.session.rollback()
+            logger.info(
+                "orchestrator_duplicate_race", extra={"id": parsed.whatsapp_message_id}
+            )
+            return None
+        await self.session.refresh(msg_in)
+        await emit_to_conversation(
+            str(conv.id), "wa.message.received", _msg_to_dict(msg_in)
+        )
+
+        try:
+            await self.whatsapp.send_reaction(
+                remote_jid=parsed.remote_jid,
+                message_id=parsed.whatsapp_message_id,
+                from_me=False,
+                emoji="👍",
+            )
+            await emit_to_conversation(
+                str(conv.id),
+                "wa.reaction.sent",
+                {"messageId": parsed.whatsapp_message_id, "emoji": "👍"},
+            )
+        except EvolutionAPIError as exc:
+            logger.warning("reaction_failed", extra={"error": str(exc)})
+
+        if lead.bot_paused:
+            logger.info(
+                "orchestrator_skipped_bot_paused",
+                extra={
+                    "conversation_id": str(conv.id),
+                    "message_id": parsed.whatsapp_message_id,
+                },
+            )
+            msg_in.processed_at = _now()
+            self.session.add(msg_in)
+            await self.session.commit()
+            await self.session.refresh(msg_in)
+            return None
+
+        if parsed.message_type == MessageType.IMAGE:
+            description = await self._describe_image(parsed)
+            if description:
+                msg_in.transcription = description
+                self.session.add(msg_in)
+                await self.session.commit()
+                await self.session.refresh(msg_in)
+                await emit_to_conversation(
+                    str(conv.id),
+                    "audio.transcribed",
+                    {"messageId": str(msg_in.id), "transcription": description},
+                )
+        elif parsed.message_type == MessageType.AUDIO:
+            transcription = await self._transcribe_audio(parsed)
+            if transcription:
+                msg_in.transcription = transcription
+                self.session.add(msg_in)
+                await self.session.commit()
+                await self.session.refresh(msg_in)
+                await emit_to_conversation(
+                    str(conv.id),
+                    "audio.transcribed",
+                    {"messageId": str(msg_in.id), "transcription": transcription},
+                )
+
+        return msg_in
+
+    async def process_pending(
+        self, conversation_id: str, message_ids: list[str]
+    ) -> None:
+        """Steps 6-11 batched: AI single-call agregando N mensagens, 1 resposta.
+
+        Filtra Messages com `processed_at IS NULL` no DB — protege contra
+        reprocessamento se worker crashou entre LRANGE e DEL no Redis.
+        Marca todas como `processed_at = NOW` ao final (sucesso OU falha).
+        """
+        from uuid import UUID as _UUID
+
+        try:
+            uuid_ids = [_UUID(mid) for mid in message_ids]
+        except (ValueError, TypeError):
+            logger.warning("process_pending_invalid_ids", extra={"ids": message_ids})
+            return
+
+        result = await self.session.execute(
+            select(Message)
+            .where(
+                Message.id.in_(uuid_ids),
+                Message.processed_at.is_(None),
+                Message.direction == Direction.IN,
+            )
+            .order_by(Message.created_at.asc())
+        )
+        messages = list(result.scalars().all())
+        if not messages:
+            logger.info(
+                "process_pending_nothing_to_do",
+                extra={"conversation_id": conversation_id, "ids": message_ids},
+            )
+            return
+
+        conv = (
+            await self.session.execute(
+                select(Conversation).where(Conversation.id == messages[0].conversation_id)
+            )
+        ).scalar_one_or_none()
+        if conv is None:
+            return
+        lead = (
+            await self.session.execute(select(Lead).where(Lead.id == conv.lead_id))
+        ).scalar_one_or_none()
+        if lead is None:
+            return
+
+        if lead.bot_paused:
+            logger.info(
+                "process_pending_skipped_bot_paused", extra={"lead_id": str(lead.id)}
+            )
+            for m in messages:
+                m.processed_at = _now()
+                self.session.add(m)
+            await self.session.commit()
+            return
+
+        chunks: list[str] = []
+        for m in messages:
+            text = m.transcription or m.content or ""
+            if not text and m.type == MessageType.AUDIO:
+                text = "[áudio sem transcrição]"
+            if not text and m.type == MessageType.IMAGE:
+                text = "[imagem sem descrição]"
+            if text:
+                chunks.append(text)
+        ai_input_text = "\n".join(chunks) if chunks else "[mensagens sem conteúdo]"
+
+        last = messages[-1]
+        last_jid = lead.whatsapp_jid
+        last_wa_id = last.whatsapp_message_id
+        last_was_audio = last.type == MessageType.AUDIO
+
+        try:
+            await self.whatsapp.send_presence(
+                number=jid_to_phone(last_jid), presence="composing", delay_ms=8000
+            )
+        except EvolutionAPIError as exc:
+            logger.warning("presence_failed", extra={"error": str(exc)})
+
+        await emit_to_conversation(
+            str(conv.id),
+            "ai.thinking",
+            {"conversationId": str(conv.id), "status": "start"},
+        )
+        history = await self._history(conv.id)
+        if history and history[-1].role == "user" and history[-1].content == ai_input_text:
+            history = history[:-1]
+
+        try:
+            ai_resp: AIResponse = await self.ai.generate_response(
+                system_prompt=build_system_prompt(),
+                history=history,
+                user_message=ai_input_text,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("ai_failed", extra={"error": str(exc)})
+            await emit_to_conversation(
+                str(conv.id),
+                "ai.thinking",
+                {"conversationId": str(conv.id), "status": "end"},
+            )
+            await emit_global("error", {"code": "ai_error", "message": str(exc)})
+            if last_wa_id:
+                try:
+                    await self.whatsapp.send_reaction(
+                        remote_jid=last_jid,
+                        message_id=last_wa_id,
+                        from_me=False,
+                        emoji="⚠️",
+                    )
+                except EvolutionAPIError:
+                    pass
+            for m in messages:
+                m.processed_at = _now()
+                self.session.add(m)
+            await self.session.commit()
+            return
+
+        await emit_to_conversation(
+            str(conv.id),
+            "ai.thinking",
+            {"conversationId": str(conv.id), "status": "end"},
+        )
+
+        self._apply_extracted_to_lead(lead, ai_resp)
+        if ai_resp.status_suggestion:
+            lead.status = ai_resp.status_suggestion
+        if (
+            ai_resp.intent == Intent.HUMAN_HANDOFF
+            or ai_resp.status_suggestion == LeadStatus.NEEDS_HUMAN
+        ):
+            lead.bot_paused = True
+            logger.info(
+                "orchestrator_auto_paused",
+                extra={"lead_id": str(lead.id), "intent": ai_resp.intent.value},
+            )
+        lead.updated_at = _now()
+        conv.last_intent = ai_resp.intent
+        conv.last_message_at = _now()
+        self.session.add(lead)
+        self.session.add(conv)
+
+        out_type = MessageType.AUDIO if last_was_audio else MessageType.TEXT
+        msg_out = Message(
+            conversation_id=conv.id,
+            direction=Direction.OUT,
+            type=out_type,
+            content=ai_resp.reply,
+            intent=ai_resp.intent,
+            status=MessageStatus.PENDING,
+            quoted_message_id=last.id,
+        )
+        self.session.add(msg_out)
+        await self.session.commit()
+        await self.session.refresh(msg_out)
+
+        await emit_to_conversation(str(conv.id), "lead.updated", _lead_to_dict(lead))
+        await emit_to_conversation(
+            str(conv.id),
+            "conversation.status_changed",
+            {"id": str(conv.id), "last_intent": ai_resp.intent.value},
+        )
+        await emit_to_conversation(
+            str(conv.id), "ai.response.generated", _msg_to_dict(msg_out)
+        )
+
+        try:
+            if out_type == MessageType.AUDIO:
+                send_result = await self._send_audio_reply_for(
+                    jid=last_jid, reply_text=ai_resp.reply
+                )
+                msg_out.media_mime = f"audio/ogg; codecs={self.tts.format}"
+            else:
+                quoted = None
+                if last_wa_id:
+                    quoted = {
+                        "key": {
+                            "remoteJid": last_jid,
+                            "fromMe": False,
+                            "id": last_wa_id,
+                        },
+                        "message": {
+                            "conversation": last.transcription or last.content or ""
+                        },
+                    }
+                send_result = await self.whatsapp.send_text(
+                    number=jid_to_phone(last_jid),
+                    text=ai_resp.reply,
+                    quoted=quoted,
+                )
+            wa_id = (
+                (send_result.get("key") or {}).get("id")
+                if isinstance(send_result, dict)
+                else None
+            )
+            msg_out.whatsapp_message_id = wa_id
+            msg_out.status = MessageStatus.SENT
+        except EvolutionAPIError as exc:
+            logger.exception("send_failed", extra={"error": str(exc), "type": out_type.value})
+            msg_out.status = MessageStatus.FAILED
+            msg_out.error_reason = exc.__class__.__name__
+            await emit_global(
+                "error",
+                {
+                    "code": f"send_{out_type.value}_failed",
+                    "message": "evolution send failed",
+                    "conversation_id": str(conv.id),
+                },
+            )
+            if out_type == MessageType.AUDIO:
+                try:
+                    await self.whatsapp.send_text(
+                        number=jid_to_phone(last_jid), text=ai_resp.reply
+                    )
+                    msg_out.status = MessageStatus.SENT
+                    msg_out.error_reason = (msg_out.error_reason or "") + "|fallback_text_ok"
+                except EvolutionAPIError:
+                    msg_out.error_reason = (msg_out.error_reason or "") + "|fallback_text_failed"
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "send_unexpected",
+                extra={"error_class": exc.__class__.__name__, "type": out_type.value},
+            )
+            msg_out.status = MessageStatus.FAILED
+            msg_out.error_reason = exc.__class__.__name__
+        finally:
+            self.session.add(msg_out)
+            for m in messages:
+                m.processed_at = _now()
+                self.session.add(m)
+            await self.session.commit()
+            await self.session.refresh(msg_out)
+            event_name = (
+                "wa.audio.sent" if out_type == MessageType.AUDIO else "wa.message.sent"
+            )
+            await emit_to_conversation(str(conv.id), event_name, _msg_to_dict(msg_out))
+
+        if last_wa_id:
+            emoji = self._reaction_for_status(lead.status)
+            try:
+                await self.whatsapp.send_reaction(
+                    remote_jid=last_jid,
+                    message_id=last_wa_id,
+                    from_me=False,
+                    emoji=emoji,
+                )
+                await emit_global(
+                    "wa.reaction.sent",
+                    {"messageId": last_wa_id, "emoji": emoji},
+                )
+            except EvolutionAPIError as exc:
+                logger.warning("smart_reaction_failed", extra={"error": str(exc)})
+
+    async def _send_audio_reply_for(self, *, jid: str, reply_text: str) -> dict:
+        """Variante de `_send_audio_reply` que aceita JID direto (não ParsedMessage)."""
+        import base64
+
+        audio_bytes = await self.tts.synthesize(
+            text=reply_text,
+            instructions=(
+                "Tom cordial, profissional, ritmo natural. Voz de assistente comercial brasileiro."
+            ),
+        )
+        audio_b64 = base64.b64encode(audio_bytes).decode("ascii")
+        return await self.whatsapp.send_audio(
+            number=jid_to_phone(jid), audio_base64=audio_b64
+        )
 
     async def handle_incoming(self, parsed: ParsedMessage) -> None:
         """Pipeline completa para uma mensagem recebida."""

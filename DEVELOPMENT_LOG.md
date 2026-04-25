@@ -805,3 +805,39 @@ docker compose exec -T db psql -U contactpro -d contactpro -c "\d leads" | grep 
 ```
 
 **Tempo:** ~50min.
+
+---
+
+## 2026-04-25 19:50 — PR #65 / Issue #64: buffer Redis com debounce + worker asyncio (Spec D.2)
+
+**Contexto:** segunda PR do épico #61. Antes do D.2, lead que manda 3 mensagens em < 5s gerava 3 chamadas IA (caro + respostas fora de contexto agregado). Esta PR agrega via buffer Redis + worker asyncio.
+
+**Decisões:**
+- **Migration 0003**: `Message.processed_at: datetime | None` + index `(conversation_id, processed_at)`. NULL = ainda não processado.
+- **`services/message_buffer.py`** (novo): `enqueue` (LPUSH+SET pipeline), `flush_due` (SCAN cursor + atomic LRANGE+DEL), `buffer_worker` (loop infinito tick=1s).
+- **Orchestrator refactor**: extraído `persist_incoming(parsed)` (steps 1-5) e `process_pending(conv_id, [msg_ids])` (steps 6-11 batched). `handle_incoming` mantido como entry-point legacy.
+- **Webhook `messages.upsert`**: chama `persist_incoming` + `enqueue`. Retorna 200 imediato. **Fallback síncrono** se Redis cair.
+- **`core/redis.py`** (novo): singleton + close_redis no shutdown.
+- **`main.py` lifespan**: `asyncio.create_task(buffer_worker(...))` no startup; cancel + close no shutdown.
+- **`config.py`**: `message_buffer_debounce_seconds: int = Field(default=5, ge=0, le=60)`. 0 desliga worker (modo legacy).
+- **Quoted reply na última mensagem do batch**. Modalidade da resposta segue a última (áudio se última foi áudio).
+
+**Reviews aplicadas:**
+- `sentry-skills:code-review`: ✅ Migration safe, worker isolado, callback nova SessionLocal por batch, fallback síncrono no webhook.
+- `sentry-skills:security-review`: ✅ 0 findings. Webhook auth inalterada. `process_pending` valida `_UUID(mid)` antes de query.
+
+**Smoke test:**
+```bash
+cd backend && uv run pytest tests/api -q  # 32 passed
+docker compose up -d --build backend
+docker compose exec -T db psql -U contactpro -d contactpro -c "SELECT version_num FROM alembic_version;"
+# 0003_message_processed_at ✓
+docker compose logs backend | grep buffer_worker_scheduled  # → debounce_seconds: 5 ✓
+```
+
+**Trade-offs:**
+- Refactor amplo do orchestrator (~250 LOC). `handle_incoming` legacy mantido sem mudança comportamental.
+- Sem testes do orchestrator/buffer nesta PR — Spec B (PRs 4-5) cobrirá com factory-boy + fakeredis + respx.
+- Worker tick 1s = latência adicional 0-1s.
+
+**Tempo:** ~70min.

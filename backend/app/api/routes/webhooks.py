@@ -78,16 +78,17 @@ async def evolution_webhook(
         if parsed.from_me:
             return {"status": "ignored", "reason": "self_message"}
 
-        # ConversationOrchestrator administra a sessão internamente.
+        # 1) Persiste IN + reactions + STT/vision (steps 1-5 do pipeline).
+        # 2) Enfileira no buffer Redis com debounce — worker async agrega
+        #    mensagens consecutivas (< MESSAGE_BUFFER_DEBOUNCE_SECONDS) em
+        #    1 só chamada de IA. Reduz custo + melhora contexto da resposta.
         async with SessionLocal() as session:
             orchestrator = ConversationOrchestrator(session)
             try:
-                await orchestrator.handle_incoming(parsed)
+                msg = await orchestrator.persist_incoming(parsed)
             except Exception as exc:  # noqa: BLE001
-                # Loga full exc internamente; resposta ao Evolution é genérica para não
-                # vazar stack/SQL hints (achado [Médio] do security review).
                 logger.exception(
-                    "orchestrator_failed",
+                    "orchestrator_persist_failed",
                     extra={
                         "error_class": exc.__class__.__name__,
                         "remote_jid": _mask_jid(parsed.remote_jid),
@@ -97,9 +98,43 @@ async def evolution_webhook(
                     "error",
                     {"code": "orchestrator_failed", "message": "internal_error"},
                 )
-                # Devolver 200 para Evolution não fazer redelivery infinita.
                 return {"status": "error"}
-        return {"status": "processed", "id": parsed.whatsapp_message_id}
+
+        if msg is None:
+            # Descartada (from_me / duplicata / lead pausado). Sem enqueue.
+            return {"status": "skipped", "id": parsed.whatsapp_message_id}
+
+        # Enqueue no Redis pro worker processar batched.
+        try:
+            from app.core.redis import get_redis
+            from app.services.message_buffer import enqueue
+
+            redis_client = get_redis()
+            await enqueue(
+                redis_client,
+                conversation_id=str(msg.conversation_id),
+                message_id=str(msg.id),
+                debounce_seconds=settings.message_buffer_debounce_seconds,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "buffer_enqueue_failed",
+                extra={
+                    "error_class": exc.__class__.__name__,
+                    "message_id": str(msg.id),
+                },
+            )
+            # Fallback: processa síncrono se Redis estiver fora.
+            async with SessionLocal() as session:
+                fallback = ConversationOrchestrator(session)
+                try:
+                    await fallback.process_pending(
+                        str(msg.conversation_id), [str(msg.id)]
+                    )
+                except Exception:
+                    logger.exception("fallback_process_failed")
+
+        return {"status": "queued", "id": parsed.whatsapp_message_id}
 
     if event in {"connection.update"}:
         data = payload.get("data") or {}

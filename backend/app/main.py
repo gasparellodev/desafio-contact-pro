@@ -1,3 +1,5 @@
+import asyncio
+import logging
 from contextlib import asynccontextmanager
 
 import socketio
@@ -7,15 +9,52 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes import conversations, health, leads, webhooks, whatsapp
 from app.core.config import get_settings
 from app.core.logging import configure_logging
+from app.core.redis import close_redis, get_redis
 from app.core.socketio import sio
+from app.db.session import SessionLocal
+from app.services.conversation_orchestrator import ConversationOrchestrator
+from app.services.message_buffer import buffer_worker
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
+
+
+async def _process_batch_callback(conversation_id: str, message_ids: list[str]) -> None:
+    """Callback chamado pelo buffer_worker quando uma deadline expira.
+
+    Cria sessão DB nova por batch (não compartilha entre batches pra evitar
+    contaminação de transação).
+    """
+    async with SessionLocal() as session:
+        orchestrator = ConversationOrchestrator(session)
+        await orchestrator.process_pending(conversation_id, message_ids)
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     configure_logging()
-    yield
+    # Worker do buffer Redis (D.2). Só sobe se debounce > 0; em testes
+    # unitários (debounce=0) o webhook processa síncrono.
+    worker_task: asyncio.Task | None = None
+    if settings.message_buffer_debounce_seconds > 0:
+        redis_client = get_redis()
+        worker_task = asyncio.create_task(
+            buffer_worker(redis_client, process_batch=_process_batch_callback)
+        )
+        logger.info(
+            "buffer_worker_scheduled",
+            extra={"debounce_seconds": settings.message_buffer_debounce_seconds},
+        )
+    try:
+        yield
+    finally:
+        if worker_task is not None:
+            worker_task.cancel()
+            try:
+                await worker_task
+            except asyncio.CancelledError:
+                pass
+        await close_redis()
 
 
 fastapi_app = FastAPI(
