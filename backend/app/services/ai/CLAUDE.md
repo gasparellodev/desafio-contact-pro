@@ -6,7 +6,7 @@
 
 1. **Output sempre estruturado.** O orchestrator depende de `AIResponse{reply, intent, lead_extracted, status_suggestion}`. Cada provider faz o que for preciso para garantir esse shape.
 2. **OpenAI**: `client.chat.completions.parse(response_format=AIResponse)`. Não usar `response_format={type: json_schema, ...}` cru (mais frágil em 2026).
-3. **Anthropic**: `tool_choice={"type":"tool","name":"emit_response"}` forçado, com `input_schema` explícito (espelha o `AIResponse`). System prompt em **block list** com `cache_control: ephemeral` para reduzir custo do KB Contact Pro em ~90% após a 1ª chamada.
+3. **Anthropic**: `tool_choice={"type":"tool","name":"emit_response"}` forçado. **`input_schema` é derivado automaticamente de `AIResponse.model_json_schema()`** (em `_build_emit_tool_schema`) — sem hard-code, sem drift. System prompt em **block list** com `cache_control: ephemeral` para reduzir custo do KB Contact Pro em ~90% após a 1ª chamada.
 4. **Não usar `extended_thinking`** no Anthropic provider — incompatível com tool_choice forçado.
 5. **Vision** vive no mesmo provider (mesma API key); orchestrator descreve a imagem em texto e alimenta o pipeline de conversa.
 
@@ -34,7 +34,7 @@ ANTHROPIC_API_KEY=...         # explícito
 
 - Importar `OpenAIProvider`/`AnthropicProvider` direto em outros módulos — use `get_ai_provider()`.
 - Inserir `temperature=0` no provider Anthropic — devolve respostas robóticas. Default `0.4`.
-- Modificar `EMIT_TOOL_SCHEMA` sem refletir em `AIResponse` (test break imediato).
+- Editar `EMIT_TOOL_SCHEMA` à mão — o schema é gerado de `AIResponse`. Para mudar o contrato, mude o Pydantic.
 - Usar `print` para logar respostas — `logger.info({...})` estruturado.
 - Hard-code de prompt em outro lugar — único lugar é `prompts.py:build_system_prompt`.
 

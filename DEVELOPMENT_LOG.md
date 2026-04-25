@@ -369,3 +369,28 @@ LeadPanel + status pills + intent badges já estavam no PR #10. Marcado completo
 - Bonus: response do orchestrator não vaza `str(exc)`; helper `_mask_jid` para PII em logs.
 
 **Tempo:** ~15 min.
+
+---
+
+## 2026-04-25 15:00 — PR de follow-up C: derivar Anthropic tool schema do Pydantic (#35)
+
+**Decisões:**
+- `_build_emit_tool_schema()` deriva `input_schema` de `AIResponse.model_json_schema()`. Helper `_resolve_refs` inline `$ref → $defs/X` recursivamente (Anthropic não resolve `$defs` automaticamente).
+- Schema antigo (~70 linhas hard-coded) removido. `EMIT_TOOL_SCHEMA` agora calculado uma vez no import.
+- Smoke: round-trip — payload de exemplo com 9 intents válidos passa em `AIResponse.model_validate`.
+- Bonus: removido `_to_dict` que era dead code (achado [Baixo] do code review do PR #24).
+- `services/ai/CLAUDE.md` atualizado: regra agora é "schema gerado de `AIResponse`; mude o Pydantic, não o tool".
+
+**Tempo:** ~10 min.
+
+---
+
+## Recap — todos os 5 follow-ups fechados
+
+| Issue | PR follow-up | Status |
+|---|---|---|
+| #31 webhook apikey | #36 | ✅ merged |
+| #32 race idempotência | #36 | ✅ merged |
+| #34 body cap | #36 | ✅ merged |
+| #33 admin auth proxy | #37 | ✅ merged |
+| #35 schema derivation | (pending PR C) | ⏳ open |
