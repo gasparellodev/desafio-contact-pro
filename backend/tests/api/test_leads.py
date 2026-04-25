@@ -54,3 +54,49 @@ async def test_get_lead_requires_admin_token(client: AsyncClient, session: Async
     # Remove o header padrão para testar 401
     response = await client.get(f"/api/leads/{lead.id}", headers={"X-Admin-Token": ""})
     assert response.status_code == 401
+
+
+# ----- POST /api/leads/{id}/resume-bot -----
+
+
+async def test_resume_bot_clears_paused_flag(client: AsyncClient, session: AsyncSession):
+    from app.models.lead import Lead
+
+    lead = Lead(
+        whatsapp_jid="5511999990999@s.whatsapp.net",
+        name="Pausado",
+        bot_paused=True,
+    )
+    session.add(lead)
+    await session.commit()
+    await session.refresh(lead)
+
+    response = await client.post(f"/api/leads/{lead.id}/resume-bot")
+
+    assert response.status_code == 200
+    assert response.json()["bot_paused"] is False
+    # Confere persistência via GET
+    get_resp = await client.get(f"/api/leads/{lead.id}")
+    assert get_resp.json()["bot_paused"] is False
+
+
+async def test_resume_bot_is_idempotent(client: AsyncClient, session: AsyncSession):
+    """Chamar resume-bot quando já está False não erra (no-op)."""
+    lead = await _make_lead(session)
+    assert lead.bot_paused is False
+
+    response = await client.post(f"/api/leads/{lead.id}/resume-bot")
+
+    assert response.status_code == 200
+    assert response.json()["bot_paused"] is False
+
+
+async def test_resume_bot_returns_404_for_missing(client: AsyncClient):
+    response = await client.post(f"/api/leads/{uuid4()}/resume-bot")
+    assert response.status_code == 404
+
+
+async def test_resume_bot_requires_admin_token(client: AsyncClient, session: AsyncSession):
+    lead = await _make_lead(session)
+    response = await client.post(f"/api/leads/{lead.id}/resume-bot", headers={"X-Admin-Token": ""})
+    assert response.status_code == 401

@@ -15,6 +15,9 @@ Cérebro do sistema. Recebe `ParsedMessage` do webhook Evolution e administra to
 5. **Reaction 👍 é fire-and-forget.** Falha não interrompe o pipeline (apenas loga warning).
 6. **Smart reaction final** depende do `status` do lead pós-AI: ✅ qualified, 👌 opt_out, 🤝 needs_human, 👍 new.
 7. **Histórico tem cap de 12 mensagens** (`HISTORY_LIMIT`) para controlar custo de prompt e latência.
+8. **Skip-when-paused.** Se `lead.bot_paused = True`: persistimos a Message IN, emitimos `wa.message.received`, mandamos reaction 👍 (fire-and-forget) e **retornamos**. Sem typing, sem AI, sem resposta. Humano responde via UI (`POST /api/conversations/{id}/messages`).
+9. **Auto-pause em handoff.** Quando AI retorna `intent == HUMAN_HANDOFF` ou `status_suggestion == NEEDS_HUMAN`, marcamos `lead.bot_paused = True` ANTES de mandar a resposta. A última fala da IA ainda vai (avisar o lead que vai transferir); próximas mensagens caem no skip. Admin retoma com `POST /api/leads/{id}/resume-bot`.
+10. **Typing indicator.** Antes de chamar AI, `evolution.send_presence(composing, delay=8000)` em try/except. Falha NÃO interrompe pipeline (Evolution offline ou método não suportado vira só warning).
 
 ### Pipeline (texto)
 

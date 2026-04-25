@@ -78,6 +78,16 @@ tests/                     # pytest async + testcontainers (23 testes hoje)
 | O que | Onde | Convenção em |
 |---|---|---|
 | Endpoint REST | `app/api/routes/<nome>.py` + registrar em `app/main.py` | [`app/api/CLAUDE.md`](./app/api/CLAUDE.md) |
+
+## Endpoints atuais
+
+- `GET /health` — liveness + dependencies (DB/Redis/Evolution).
+- `POST /api/webhooks/evolution` — webhook Evolution (apikey-protected).
+- `/api/whatsapp/*` (admin) — instance/qrcode/connection/webhook setup.
+- `GET /api/conversations[, /{id}, /{id}/messages]` (admin) — listar conversas + mensagens cursor.
+- `POST /api/conversations/{id}/messages` (admin) — **humano envia mensagem manual** (handoff).
+- `GET /api/leads/{id}` (admin) — detalhe completo do lead.
+- `POST /api/leads/{id}/resume-bot` (admin) — **libera bot quando estiver pausado por handoff**.
 | Pydantic schema | `app/schemas/<nome>.py` (`<X>Read`/`<X>Summary`/`<X>ListItem`/`<X>List`/`<X>Page`) | [`app/schemas/CLAUDE.md`](./app/schemas/CLAUDE.md) |
 | Service | `app/services/<nome>/` | [`app/services/CLAUDE.md`](./app/services/CLAUDE.md) |
 | Model + migration | `app/models/<nome>.py` + `uv run alembic revision --autogenerate -m "..."` | [`app/models/CLAUDE.md`](./app/models/CLAUDE.md) |
