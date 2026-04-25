@@ -57,12 +57,12 @@ git clone https://github.com/gasparellodev/desafio-contact-pro.git
 cd desafio-contact-pro
 
 cp .env.example .env
-# Edite .env e preencha pelo menos:
-#   OPENAI_API_KEY=sk-...                  (obrigatório se AI_PROVIDER=openai e para STT/TTS/vision)
+# Edite .env e preencha SÓ as 4 chaves do bloco "Setup mínimo":
+#   OPENAI_API_KEY=sk-...                  (obrigatório se AI_PROVIDER=openai; também usado por STT/TTS/vision)
 #   ANTHROPIC_API_KEY=sk-ant-...           (obrigatório se AI_PROVIDER=anthropic)
-#   EVOLUTION_API_KEY=qualquer-string-aqui (será o seu apikey do Evolution)
-#   ADMIN_API_TOKEN=qualquer-string-aqui   (protege endpoints REST + UI; também vai pra VITE_ADMIN_TOKEN)
-#   AI_API_KEY=                            (fallback usado quando faltar a explícita)
+#   EVOLUTION_API_KEY=qualquer-string-aqui (sua "senha" da instância Evolution)
+#   ADMIN_API_TOKEN + VITE_ADMIN_TOKEN     (a MESMA string nos dois — protege endpoints + UI)
+# Tudo o resto tem default funcional pro Docker; só override se precisar.
 
 docker compose up --build
 ```
