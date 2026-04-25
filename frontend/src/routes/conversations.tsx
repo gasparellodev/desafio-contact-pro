@@ -16,6 +16,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { ConversationList } from '@/components/chat/ConversationList'
 import { QRCodePanel } from '@/components/connection/QRCodePanel'
 import { LeadPanel } from '@/components/lead/LeadPanel'
+import { ConversationListSkeleton } from '@/components/Skeletons'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useConnectionStatus } from '@/hooks/useConnectionStatus'
 import { useConversationsQuery } from '@/hooks/useConversationsQuery'
@@ -77,9 +78,9 @@ export function ConversationsPage() {
       </CardHeader>
       <CardContent className="flex-1 overflow-hidden p-0">
         {isLoading ? (
-          <div className="text-muted-foreground p-4 text-xs">Carregando…</div>
+          <ConversationListSkeleton rows={5} />
         ) : error ? (
-          <div className="text-destructive p-4 text-xs">
+          <div role="alert" className="text-destructive p-4 text-xs">
             Erro ao carregar conversas. {(error as Error).message}
           </div>
         ) : (

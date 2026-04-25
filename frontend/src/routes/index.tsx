@@ -1,22 +1,32 @@
+import { lazy, Suspense } from 'react'
 import { createBrowserRouter, Navigate } from 'react-router-dom'
 
-import { ConversationsPage } from './conversations'
-import { NotFoundPage } from './not-found'
+import { RouteFallbackSkeleton } from '@/components/Skeletons'
+
 import { RootLayout } from './root'
+
+// Code splitting por rota: bundle inicial fica menor (somente shell + react-router
+// + tanstack query + socket). Conversations/NotFound viram chunks lazy.
+const ConversationsPage = lazy(() =>
+  import('./conversations').then((m) => ({ default: m.ConversationsPage }))
+)
+const NotFoundPage = lazy(() =>
+  import('./not-found').then((m) => ({ default: m.NotFoundPage }))
+)
+
+function withSuspense(node: React.ReactNode) {
+  return <Suspense fallback={<RouteFallbackSkeleton />}>{node}</Suspense>
+}
 
 export const router = createBrowserRouter([
   {
     path: '/',
     element: <RootLayout />,
     children: [
-      // / e /conversations apontam pra mesma página; /conversations/:id também,
-      // o ID vem via useParams. Mantemos numa rota só por simplicidade —
-      // separar em outlet aninhado entra na Phase 3 quando o mobile precisar
-      // de telas distintas.
       { index: true, element: <Navigate to="/conversations" replace /> },
-      { path: 'conversations', element: <ConversationsPage /> },
-      { path: 'conversations/:id', element: <ConversationsPage /> },
+      { path: 'conversations', element: withSuspense(<ConversationsPage />) },
+      { path: 'conversations/:id', element: withSuspense(<ConversationsPage />) },
     ],
   },
-  { path: '*', element: <NotFoundPage /> },
+  { path: '*', element: withSuspense(<NotFoundPage />) },
 ])

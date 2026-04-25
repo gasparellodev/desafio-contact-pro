@@ -10,6 +10,7 @@ import type { ReactNode } from 'react'
 
 import { MessageList } from '@/components/chat/MessageList'
 import { LeadSheet } from '@/components/lead/LeadSheet'
+import { MessageListSkeleton } from '@/components/Skeletons'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useConnectionStatus } from '@/hooks/useConnectionStatus'
 import { useConversationMessages } from '@/hooks/useConversationMessages'
@@ -54,9 +55,9 @@ export function ConversationView({
       </CardHeader>
       <CardContent className="flex-1 overflow-hidden p-0">
         {messages.isLoading ? (
-          <div className="text-muted-foreground p-4 text-xs">Carregando mensagens…</div>
+          <MessageListSkeleton />
         ) : messages.error ? (
-          <div className="text-destructive p-4 text-xs">
+          <div role="alert" className="text-destructive p-4 text-xs">
             Erro ao carregar mensagens. {(messages.error as Error).message}
           </div>
         ) : (

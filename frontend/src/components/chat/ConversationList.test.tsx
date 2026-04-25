@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
+import { runAxe } from '@/test/test-utils'
 import type { Conversation, Lead } from '@/types/domain'
 
 import { ConversationList } from './ConversationList'
@@ -57,5 +58,17 @@ describe('ConversationList', () => {
     const items = [makeItem({}, { id: 'conv-X' })]
     render(<ConversationList items={items} activeId="conv-X" onSelect={() => {}} />)
     expect(screen.getByRole('button')).toHaveAttribute('aria-current', 'true')
+  })
+
+  it('passa axe sem violations (com itens)', async () => {
+    const items = [
+      makeItem({ status: 'qualified', name: 'Maria' }, { id: 'c1' }),
+      makeItem({ status: 'needs_human', name: 'João' }, { id: 'c2' }),
+    ]
+    const { container } = render(
+      <ConversationList items={items} activeId="c1" onSelect={() => {}} />
+    )
+    const result = await runAxe(container)
+    expect(result.violations).toEqual([])
   })
 })

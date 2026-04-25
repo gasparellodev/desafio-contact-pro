@@ -545,6 +545,80 @@ docker compose up -d --build frontend
 
 ---
 
+## 2026-04-25 17:50 — PR #54 / Issue #53: UX polish + a11y axe + code splitting + coverage gates (Spec A — Phase 4+5)
+
+**Contexto:** última PR do Spec A. Polonês final do frontend depois de Phase 1-3.
+
+**Decisões:**
+- **`runAxe(container)`** helper em `src/test/test-utils.tsx` chamando `axe-core` direto (sem `vitest-axe` que está abandonado). `color-contrast` rule desligada em jsdom (não computa cores reais). Assertion idiomática: `expect(result.violations).toEqual([])`.
+- **`ErrorBoundary`** classe React em `src/components/ErrorBoundary.tsx` envolvendo o `RouterProvider` em `main.tsx`. Captura qualquer erro de rota; mostra UI com botão "Tentar novamente" (reset do state). React 19 ainda não tem hook equivalente.
+- **Code splitting por rota**: `routes/index.tsx` agora importa `ConversationsPage`/`NotFoundPage` via `React.lazy(() => import(...))` envolvidas em `<Suspense fallback={<RouteFallbackSkeleton />}>`. Initial bundle dropou de 472KB → 390KB, **gzip 146KB → 123KB**. Conversations vira chunk lazy de 25KB gzip; not-found 0.4KB gzip.
+- **Skeletons** em `src/components/Skeletons.tsx` — `ConversationListSkeleton`, `MessageListSkeleton`, `RouteFallbackSkeleton` (combinação dos dois). Todos com `aria-busy="true"` + `aria-live="polite"`. Substituem o "Carregando..." textual em `routes/conversations.tsx` e `routes/conversation.tsx` quando `useQuery` está em `isLoading`.
+- **Error states** ganham `role="alert"` (já tinha no ErrorBoundary; adicionado nos branches de erro das rotas).
+- **Coverage thresholds** em `vitest.config.ts` calibrados ao estado atual: **80% statements / 60% branches / 80% functions / 80% lines**. Rotas excluídas (E2E Playwright Spec C cuida); `lib/socket.ts` (singleton trivial) e `lib/query-client.ts` (factory) excluídos. Result: 83.4% / 63.7% / 85.7% / 89.2% — todos passam. Branches em 60% reflete que ainda há paths defensivos não exercitados em `SocketProvider`/`api.ts`/`QRCodePanel.bootstrap()` (pode subir incrementalmente).
+- **`eslint.config.js`** ganha:
+  - `globalIgnores(['dist', 'coverage'])` — ignora HTML reports.
+  - Override desligando `react-refresh/only-export-components` em `src/routes/**` (router config + lazy imports não são Fast Refresh-friendly).
+- **10 testes novos**, total 50:
+  - `ErrorBoundary.test.tsx` — render normal vs erro capturado (alert + botão de reset).
+  - `Skeletons.test.tsx` — aria-busy presente, axe-clean.
+  - `LeadPanel.test.tsx` — placeholder, render preenchido, **axe-clean** em ambos os estados.
+  - `ConversationList.test.tsx` ganha teste de **axe-clean** com itens.
+
+**Dificuldades:**
+- Tentei testar o ciclo completo de reset do ErrorBoundary, mas após `setState({error: null})` o React tenta re-renderizar os children EXISTENTES (que ainda jogam). Solução: testar apenas que a UI de fallback aparece + botão presente. Reset é difícil de provar com mesmo `<Bomb explode={true}>` em memória.
+
+**Trade-offs:**
+- **Branches threshold em 60% (não 75%)**: caminho dos providers/api têm muito branch defensivo (try/except, optional chaining em payloads do Socket.IO). Subir além exigiria forçar handlers de erro nos testes (caro). 60% travante no atual + ramping incremental é mais honesto.
+- **Sem testes de rota** (apenas mocks de hooks/providers/components): rotas são integração e merecem cobertura via Playwright (Spec C). Atual exclusion é proposital.
+- **Sem optimistic updates / Toast**: este produto é admin read-only — não há mutation pra otimismo otimismo. `sonner` viraria scope creep desnecessário.
+
+**Sugestões da IA rejeitadas/alteradas:**
+- IA propôs `vitest-axe` matcher; mantive `axe-core` direto + helper `runAxe` — controle maior, dependência menos abandonada.
+- IA propôs `useTransition` no scroll-up de mensagens (perf optimization); fica para o PR que migrar pra `useInfiniteQuery`.
+
+**Smoke test:**
+```bash
+cd frontend
+npm run typecheck            # OK
+npm run build                # 285ms — initial 390KB / gzip 123KB; conversations chunk 84KB / 25KB
+npm run lint                 # 0 erros, 0 warnings
+npm run test                 # 50/50 passing in ~3s
+npm run test:coverage        # 83.4% / 63.7% / 85.7% / 89.2% ≥ thresholds (80/60/80/80)
+
+docker compose up -d --build frontend
+```
+
+Smoke checklist manual para o usuário validar:
+- [ ] 360×640: lista cheia em /conversations; abrir conversa mostra só chat com voltar; "Detalhes" abre Sheet com Lead+QR.
+- [ ] 768×1024: 2 colunas (lista 280px + chat); Lead via Sheet.
+- [ ] 1440×900: 3 colunas (lista 320 + chat + lead/QR 320).
+- [ ] F5 em /conversations/<uuid>: mantém conversa aberta sem flash.
+- [ ] Receber mensagem WhatsApp real: aparece em tempo real na lista e na conversa ativa via Socket.IO (sem refetch REST).
+- [ ] Headers/badges em font-mono; status dot na avatar; sistema-pulse no header.
+- [ ] Forçar erro (alterar VITE_API_URL para inválido + reload): ErrorBoundary aparece com botão "Tentar novamente".
+- [ ] Initial JS gzip < 130KB (dev tools → Network → JS).
+
+**Tempo:** ~50min.
+
+---
+
+## Recap — Spec A do épico #44 fechado
+
+| PR | Phase | Issue | Status |
+|---|---|---|---|
+| #46 | 1 backend (REST APIs) | #45 | ✅ merged |
+| #48 | 1 frontend (tooling) | #47 | ✅ merged |
+| #50 | 2 (router + providers) | #49 | ✅ merged |
+| #52 | 3 (responsivo + bug fixes) | #51 | ✅ merged |
+| #54 | 4+5 (UX/a11y/perf + coverage) | #53 | ✅ merged |
+
+5 PRs, 50 testes frontend + 23 testes backend = 73 testes verdes. Bundle initial 123KB gzip (era 70KB sem TanStack Query/Router/Sheet). Cobertura ≥80% statements/lines, 60% branches, 80% functions. Lint zero erros zero warnings. Backend pipeline WhatsApp end-to-end intocado (PRs aditivas).
+
+Spec B (testes backend completos) e Spec C (CI/CD + Playwright cross-stack) ficam como próximos brainstormings.
+
+---
+
 ## 2026-04-25 17:00 — PR #50 / Issue #49: Providers + React Router + refator pra TanStack Query (Spec A — Phase 2 frontend)
 
 **Contexto:** segunda PR do Spec A. Funda a arquitetura: providers (QueryProvider + SocketProvider), rotas (React Router 7), hooks de domínio (TanStack Query) consumindo os endpoints REST do PR #46. Resolve a perda de contexto no reload (URL como fonte da verdade do `activeId`) sem mudar layout (Phase 3 cuida da responsividade).
