@@ -401,8 +401,11 @@ class ConversationOrchestrator:
         self._apply_extracted_to_lead(lead, ai_resp)
         if ai_resp.status_suggestion:
             lead.status = ai_resp.status_suggestion
+        # Auto-pause em handoff humano OU em orçamento.
+        # PRICING entra também porque consultor humano monta orçamento (bot
+        # tava entrando em loop tentando responder com dado que não tem).
         if (
-            ai_resp.intent == Intent.HUMAN_HANDOFF
+            ai_resp.intent in {Intent.HUMAN_HANDOFF, Intent.PRICING}
             or ai_resp.status_suggestion == LeadStatus.NEEDS_HUMAN
         ):
             lead.bot_paused = True
@@ -711,8 +714,11 @@ class ConversationOrchestrator:
         # 7.5 AUTO-PAUSE em handoff humano. A última fala da IA ainda vai
         # (pra avisar o lead que vai transferir), mas próxima mensagem cai
         # no skip-when-paused acima.
+        # Auto-pause em handoff humano OU em orçamento.
+        # PRICING entra também porque consultor humano monta orçamento (bot
+        # tava entrando em loop tentando responder com dado que não tem).
         if (
-            ai_resp.intent == Intent.HUMAN_HANDOFF
+            ai_resp.intent in {Intent.HUMAN_HANDOFF, Intent.PRICING}
             or ai_resp.status_suggestion == LeadStatus.NEEDS_HUMAN
         ):
             lead.bot_paused = True
