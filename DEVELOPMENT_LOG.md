@@ -397,7 +397,7 @@ LeadPanel + status pills + intent badges já estavam no PR #10. Marcado completo
 
 ---
 
-## 2026-04-25 16:30 — Issue #45: REST read endpoints (Spec A — Phase 1 backend)
+## 2026-04-25 16:30 — PR #46 / Issue #45: REST read endpoints (Spec A — Phase 1 backend)
 
 **Contexto:** parte do épico #44 (Spec A: frontend overhaul + backend read APIs). Brainstorming registrado em `/Users/gasparellodev/.claude/plans/precisamos-criar-um-plano-abstract-wombat.md`. Frontend hoje constrói estado só via Socket.IO em tempo real; reload zera tudo porque não há endpoint REST para rehidratar da Postgres (que já persiste tudo). Esta PR fecha esse buraco do lado do backend, sem tocar frontend ainda.
 
@@ -426,10 +426,20 @@ LeadPanel + status pills + intent badges já estavam no PR #10. Marcado completo
 - Considerei adicionar `last_message_preview` direto em `ConversationListItem` via subquery, mas mantive fora do v1 — UI pode pegar ao abrir conversa, e schema fica mais simples. Adicionar na v2 se for necessário pelo design da `frontend-design`.
 - Considerei testcontainers com `aiosqlite` em memória pra rodar sem Docker, mas modelo usa `PG_UUID` direto — não funciona em SQLite sem TypeDecorator. Postgres real é mais correto e o repo já depende de Docker para tudo.
 
+**Reviews aplicadas (commit fixup `08c831f`):**
+- sentry-skills:code-review + superpowers:code-reviewer + sentry-skills:security-review.
+- Cursor de `/messages` migrou para `(created_at, id)` via `tuple_` para evitar pular mensagens com timestamp idêntico (race IN/OUT). `MessagePage.next_before_id` adicionado; cliente que passa só `before` continua funcionando (compat).
+- `count_stmt` da listagem só faz JOIN com Lead quando há filtro `status`/`q`. Caso default usa `count(Conversation.id)` puro.
+- `LeadSummary` ganhou `service_interest` (sidebar usa sem round-trip extra).
+- `_escape_like` aplica escape de `%`/`_` no parâmetro `q` — busca passa a ser substring literal (princípio do menor surpresa).
+- 5 testes adicionais: invalid token (`compare_digest` path), filtros combinados, `offset >= total`, cursor com timestamp ties, serialização de campos de mídia. `test_list_messages_clamps_limit` renomeado para `rejects_limit_above_max`.
+
 **Smoke test:**
 ```bash
-cd backend && uv run pytest tests/api -v   # 17 passed in 4.63s
-uv run pytest tests/api --cov=app/schemas --cov-report=term-missing   # 100%
+cd backend && uv run pytest tests/api -v   # 23 passed in ~5s
+docker compose up -d --build backend
+curl -H "X-Admin-Token: $TOKEN" 'http://localhost:8000/api/conversations?limit=2'  # ok, lead.service_interest presente
+curl -H "X-Admin-Token: $TOKEN" 'http://localhost:8000/api/conversations?q=%25'    # total: 0 (escape funciona)
 ```
 
-**Tempo:** ~50min (incluindo brainstorming, plano, infra de testes e iteração no conftest).
+**Tempo:** ~70min (incluindo brainstorming, plano, infra de testes, iteração no conftest, 2 reviews, fixup, PR).
