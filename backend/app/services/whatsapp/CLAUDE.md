@@ -21,6 +21,7 @@
 | `POST` | `/message/sendText/{instance}` | `send_text(number, text, quoted?, delay_ms?)` |
 | `POST` | `/message/sendWhatsAppAudio/{instance}` | `send_audio(number, audio_base64, ...)` |
 | `POST` | `/message/sendReaction/{instance}` | `send_reaction(remote_jid, message_id, from_me, emoji)` |
+| `POST` | `/chat/sendPresence/{instance}` | `send_presence(number, presence='composing', delay_ms=5000)` |
 | `POST` | `/chat/getBase64FromMediaMessage/{instance}` | `download_media_base64(message_key)` |
 
 ## Convenções

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.enums import Direction, Intent, MessageStatus, MessageType
 from app.schemas.lead import LeadSummary
@@ -62,6 +62,17 @@ class ConversationList(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class MessageCreate(BaseModel):
+    """Input para envio manual por humano (POST /api/conversations/{id}/messages).
+
+    `content` é obrigatório, max 4096 chars (limite WhatsApp). Tipo é sempre TEXT
+    nesse endpoint — humano não envia áudio/imagem por aqui (faria pelo próprio
+    WhatsApp dele se quisesse).
+    """
+
+    content: str = Field(..., min_length=1, max_length=4096)
 
 
 class MessagePage(BaseModel):

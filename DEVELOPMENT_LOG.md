@@ -762,3 +762,46 @@ Manual:
 - Desktop: comportamento da sidebar mantido.
 
 **Tempo:** ~20min.
+
+---
+
+## 2026-04-25 19:30 — PR #63 / Issue #62: backend pause de atendimento + typing indicator (Spec D.1)
+
+**Contexto:** primeira PR do épico #61 (Spec B+C+D — produção-ready). Adiciona 3 capacidades ao backend:
+
+1. **Pause de atendimento por lead** (`Lead.bot_paused`). Quando True, orchestrator não chama IA — só persiste a mensagem recebida e emite no Socket.IO.
+2. **Auto-pause em handoff humano**: quando AI retorna `intent=HUMAN_HANDOFF` ou `status_suggestion=NEEDS_HUMAN`, marca `bot_paused=True` antes de mandar a última fala (sinaliza pro lead que vai transferir).
+3. **Typing indicator no WhatsApp** via `evolution.send_presence(composing, delay=8000)` antes de chamar AI. Fire-and-forget — falha não trava pipeline.
+
+Endpoints novos:
+- `POST /api/leads/{id}/resume-bot` — libera o bot. Idempotente.
+- `POST /api/conversations/{id}/messages` — humano envia mensagem manual via UI.
+
+**Decisões:**
+- Migration 0002 manual (autogenerate evitado por causa de bugs com pg.ENUM no projeto). Coluna NOT NULL com `server_default=False` — leads existentes ficam não-pausados.
+- `LeadSummary`/`LeadRead` ganham `bot_paused` (frontend usa pra badge).
+- `MessageCreate` schema novo: `content: str (1-4096)` (limite WhatsApp).
+- `EvolutionClient.send_presence` retorna `dict | None` — Evolution não retorna body em 200, só status.
+- `POST /messages` persiste como PENDING → tenta send_text → atualiza pra SENT/FAILED. Em FAILED, persiste só `exc.__class__.__name__` (sem `str(exc)` que poderia vazar URL/credencial).
+- `_lead_to_dict` (Socket.IO) ganha `bot_paused` — frontend ouve `lead.updated` e atualiza badge em tempo real.
+
+**Trade-offs:**
+- A última fala do bot ainda vai antes da pausa — intencional. Se preferíssemos pausar imediato, lead ficaria sem entender o que aconteceu.
+- Sem rate limit no `POST /messages` — admin token é confiável; rate limit fica como follow-up de hardening.
+- Skip-when-paused do orchestrator e `send_presence` do client NÃO testados nesta PR — gap intencional, Spec B (PR 5) cobrirá com respx + fakeredis.
+
+**Reviews aplicadas:**
+- `sentry-skills:code-review`: Approve com 2 pedidos (1) PR 3 frontend deve seguir imediato — sem badge admin pode achar bot quebrou; (2) trade-off "última fala antes da pausa" documentado aqui.
+- `sentry-skills:security-review`: 0 findings (Critical/High/Medium). Auth router-level OK, ORM parametriza SQL, sem SSRF (URL Evolution é server-controlled), `error_reason` só guarda nome da classe. Auto-pause induzido por lead malicioso → impacto baixíssimo (só pausa o próprio lead, admin retoma).
+
+**Smoke test:**
+```bash
+cd backend
+uv run pytest tests/api -v   # 32 passed (era 23, +9 novos)
+uv run ruff check . --select F,I,UP --fix  # auto-aplicado
+docker compose up -d --build backend
+docker compose exec -T db psql -U contactpro -d contactpro -c "\d leads" | grep bot_paused
+# bot_paused | boolean | not null | false ✓
+```
+
+**Tempo:** ~50min.

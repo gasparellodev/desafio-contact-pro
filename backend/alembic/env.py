@@ -8,10 +8,9 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 from sqlmodel import SQLModel
 
-from alembic import context
-
 # Importa todos os models para registrar em SQLModel.metadata
 import app.db.base  # noqa: F401
+from alembic import context
 from app.core.config import get_settings
 
 # Alembic Config

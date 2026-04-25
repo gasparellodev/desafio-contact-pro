@@ -15,19 +15,26 @@ from sqlalchemy import func, or_, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.security import require_admin_token
+from app.core.socketio import emit_to_conversation
 from app.db.session import get_session
 from app.models.conversation import Conversation
-from app.models.enums import LeadStatus
+from app.models.enums import Direction, LeadStatus, MessageStatus, MessageType
 from app.models.lead import Lead
 from app.models.message import Message
 from app.schemas.conversation import (
     ConversationList,
     ConversationListItem,
     ConversationRead,
+    MessageCreate,
     MessagePage,
     MessageRead,
 )
 from app.schemas.lead import LeadSummary
+from app.services.whatsapp.evolution_client import (
+    EvolutionAPIError,
+    get_evolution_client,
+)
+from app.services.whatsapp.payload import jid_to_phone
 
 DEFAULT_LIMIT = 50
 MAX_LIMIT = 200
@@ -203,3 +210,69 @@ async def list_messages(
         next_before_id=next_before_id,
         limit=limit,
     )
+
+
+@router.post("/{conversation_id}/messages", response_model=MessageRead, status_code=201)
+async def send_manual_message(
+    conversation_id: UUID,
+    payload: MessageCreate,
+    session: AsyncSession = Depends(get_session),
+) -> MessageRead:
+    """Envia mensagem como humano (admin) pela conta WhatsApp da instância.
+
+    Persiste a Message OUT como `PENDING`, dispara `send_text` na Evolution,
+    e atualiza pra `SENT`/`FAILED` conforme o resultado. Funciona independente
+    de `lead.bot_paused` — humano sempre pode enviar (caso de uso principal:
+    bot pausado por handoff). Emite `wa.message.sent` no Socket.IO da conversa.
+
+    Requisições idempotentes? **Não** — cada chamada cria mensagem nova. Cliente
+    deve fazer debounce/disabling do botão pra evitar duplo-send.
+    """
+    row = (
+        await session.execute(
+            select(Conversation, Lead)
+            .join(Lead, Lead.id == Conversation.lead_id)
+            .where(Conversation.id == conversation_id)
+        )
+    ).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="conversation not found")
+    conversation, lead = row
+
+    msg = Message(
+        conversation_id=conversation.id,
+        direction=Direction.OUT,
+        type=MessageType.TEXT,
+        content=payload.content,
+        status=MessageStatus.PENDING,
+    )
+    session.add(msg)
+    await session.commit()
+    await session.refresh(msg)
+
+    client = get_evolution_client()
+    try:
+        result = await client.send_text(
+            number=jid_to_phone(lead.whatsapp_jid),
+            text=payload.content,
+        )
+        wa_id = (result.get("key") or {}).get("id") if isinstance(result, dict) else None
+        msg.whatsapp_message_id = wa_id
+        msg.status = MessageStatus.SENT
+    except EvolutionAPIError as exc:
+        msg.status = MessageStatus.FAILED
+        msg.error_reason = exc.__class__.__name__
+        # Não vaza str(exc) (URLs internas / hints HTTP) — log estruturado em outro lugar.
+    finally:
+        session.add(msg)
+        await session.commit()
+        await session.refresh(msg)
+        await emit_to_conversation(
+            str(conversation.id),
+            "wa.message.sent",
+            MessageRead.model_validate(msg).model_dump(mode="json"),
+        )
+
+    if msg.status == MessageStatus.FAILED:
+        raise HTTPException(status_code=502, detail="evolution send failed")
+    return MessageRead.model_validate(msg)

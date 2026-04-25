@@ -145,6 +145,21 @@ class EvolutionClient:
 
     # ===== Send =====
 
+    async def send_presence(
+        self,
+        number: str,
+        presence: str = "composing",
+        delay_ms: int = 5000,
+    ) -> dict[str, Any] | None:
+        """Indicador de presença no WhatsApp (ex: "digitando..." pro lead).
+
+        Evolution v2: POST /chat/sendPresence/{instance} { number, presence, delay }.
+        Valores aceitos: 'available', 'composing', 'recording', 'paused'.
+        Falha NÃO interrompe pipeline — chamadores devem usar try/except + warning.
+        """
+        body = {"number": number, "presence": presence, "delay": delay_ms}
+        return await self._request("POST", f"/chat/sendPresence/{self.instance}", json=body)
+
     async def send_text(
         self,
         number: str,
@@ -156,9 +171,7 @@ class EvolutionClient:
         body: dict[str, Any] = {"number": number, "text": text, "delay": delay_ms}
         if quoted:
             body["quoted"] = quoted
-        return await self._request(
-            "POST", f"/message/sendText/{self.instance}", json=body
-        )
+        return await self._request("POST", f"/message/sendText/{self.instance}", json=body)
 
     async def send_audio(
         self,
@@ -178,9 +191,7 @@ class EvolutionClient:
             "delay": delay_ms,
             "encoding": encoding,
         }
-        return await self._request(
-            "POST", f"/message/sendWhatsAppAudio/{self.instance}", json=body
-        )
+        return await self._request("POST", f"/message/sendWhatsAppAudio/{self.instance}", json=body)
 
     async def send_reaction(
         self,

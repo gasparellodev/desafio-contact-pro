@@ -19,7 +19,7 @@ Fluxo (texto; áudio/imagem entram nos PRs #11–14):
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import select
@@ -57,7 +57,7 @@ HISTORY_LIMIT = 12  # últimas N mensagens (IN+OUT) que entram no contexto da IA
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _msg_to_dict(msg: Message) -> dict:
@@ -90,6 +90,7 @@ def _lead_to_dict(lead: Lead) -> dict:
         "lead_goal": lead.lead_goal,
         "estimated_volume": lead.estimated_volume,
         "status": lead.status.value if isinstance(lead.status, LeadStatus) else lead.status,
+        "bot_paused": lead.bot_paused,
         "updated_at": lead.updated_at.isoformat() if lead.updated_at else None,
     }
 
@@ -208,9 +209,30 @@ class ConversationOrchestrator:
             )
             return
         await self.session.refresh(msg_in)
-        await emit_to_conversation(
-            str(conv.id), "wa.message.received", _msg_to_dict(msg_in)
-        )
+        await emit_to_conversation(str(conv.id), "wa.message.received", _msg_to_dict(msg_in))
+
+        # 3.5 SKIP-WHEN-PAUSED — bot pausado por handoff humano.
+        # Mensagem persistida + emitida pra UI; humano responde via UI manual.
+        # Reaction 👍 fire-and-forget mas SEM AI/typing/resposta.
+        if lead.bot_paused:
+            logger.info(
+                "orchestrator_skipped_bot_paused",
+                extra={
+                    "conversation_id": str(conv.id),
+                    "lead_id": str(lead.id),
+                    "message_id": parsed.whatsapp_message_id,
+                },
+            )
+            try:
+                await self.whatsapp.send_reaction(
+                    remote_jid=parsed.remote_jid,
+                    message_id=parsed.whatsapp_message_id,
+                    from_me=False,
+                    emoji="👍",
+                )
+            except EvolutionAPIError as exc:
+                logger.warning("paused_reaction_failed", extra={"error": str(exc)})
+            return
 
         # 4. reaction 👍
         try:
@@ -243,9 +265,8 @@ class ConversationOrchestrator:
                     {"messageId": str(msg_in.id), "transcription": description},
                 )
                 caption = parsed.text or ""
-                ai_input_text = (
-                    f"[Lead enviou imagem. Descrição: {description}]"
-                    + (f"\nLegenda: {caption}" if caption else "")
+                ai_input_text = f"[Lead enviou imagem. Descrição: {description}]" + (
+                    f"\nLegenda: {caption}" if caption else ""
                 )
             else:
                 ai_input_text = "[imagem recebida — descrição indisponível]"
@@ -266,6 +287,17 @@ class ConversationOrchestrator:
                 ai_input_text = "[áudio recebido sem transcrição disponível]"
         if not ai_input_text:
             ai_input_text = "[mensagem sem texto]"
+
+        # 5.5 typing indicator no WhatsApp (humaniza espera).
+        # Fire-and-forget: nunca bloqueia pipeline se Evolution rejeitar.
+        try:
+            await self.whatsapp.send_presence(
+                number=jid_to_phone(parsed.remote_jid),
+                presence="composing",
+                delay_ms=8000,
+            )
+        except EvolutionAPIError as exc:
+            logger.warning("presence_failed", extra={"error": str(exc)})
 
         # 6. AI thinking + chamada
         await emit_to_conversation(
@@ -303,6 +335,26 @@ class ConversationOrchestrator:
         self._apply_extracted_to_lead(lead, ai_resp)
         if ai_resp.status_suggestion:
             lead.status = ai_resp.status_suggestion
+
+        # 7.5 AUTO-PAUSE em handoff humano. A última fala da IA ainda vai
+        # (pra avisar o lead que vai transferir), mas próxima mensagem cai
+        # no skip-when-paused acima.
+        if (
+            ai_resp.intent == Intent.HUMAN_HANDOFF
+            or ai_resp.status_suggestion == LeadStatus.NEEDS_HUMAN
+        ):
+            lead.bot_paused = True
+            logger.info(
+                "orchestrator_auto_paused",
+                extra={
+                    "lead_id": str(lead.id),
+                    "intent": ai_resp.intent.value,
+                    "status_suggestion": ai_resp.status_suggestion.value
+                    if ai_resp.status_suggestion
+                    else None,
+                },
+            )
+
         lead.updated_at = _now()
         conv.last_intent = ai_resp.intent
         conv.last_message_at = _now()
@@ -310,7 +362,9 @@ class ConversationOrchestrator:
         self.session.add(conv)
 
         # 8. persist OUT — se entrada foi áudio, responder em áudio
-        out_type = MessageType.AUDIO if parsed.message_type == MessageType.AUDIO else MessageType.TEXT
+        out_type = (
+            MessageType.AUDIO if parsed.message_type == MessageType.AUDIO else MessageType.TEXT
+        )
         msg_out = Message(
             conversation_id=conv.id,
             direction=Direction.OUT,
@@ -331,9 +385,7 @@ class ConversationOrchestrator:
             "conversation.status_changed",
             {"id": str(conv.id), "last_intent": ai_resp.intent.value},
         )
-        await emit_to_conversation(
-            str(conv.id), "ai.response.generated", _msg_to_dict(msg_out)
-        )
+        await emit_to_conversation(str(conv.id), "ai.response.generated", _msg_to_dict(msg_out))
 
         # 10. envio para o WhatsApp (texto OR áudio com TTS, com quoted)
         try:
@@ -353,7 +405,9 @@ class ConversationOrchestrator:
                         "message": {"conversation": parsed.text or ""},
                     },
                 )
-            wa_id = (send_result.get("key") or {}).get("id") if isinstance(send_result, dict) else None
+            wa_id = (
+                (send_result.get("key") or {}).get("id") if isinstance(send_result, dict) else None
+            )
             msg_out.whatsapp_message_id = wa_id
             msg_out.status = MessageStatus.SENT
         except EvolutionAPIError as exc:
@@ -376,9 +430,13 @@ class ConversationOrchestrator:
                         text=ai_resp.reply,
                     )
                     msg_out.status = MessageStatus.SENT
-                    msg_out.error_reason = (msg_out.error_reason or "") + " | fallback texto enviado"
+                    msg_out.error_reason = (
+                        msg_out.error_reason or ""
+                    ) + " | fallback texto enviado"
                 except EvolutionAPIError as exc2:
-                    msg_out.error_reason = (msg_out.error_reason or "") + f" | fallback falhou: {exc2}"
+                    msg_out.error_reason = (
+                        msg_out.error_reason or ""
+                    ) + f" | fallback falhou: {exc2}"
         except Exception as exc:  # noqa: BLE001
             logger.exception(
                 "send_unexpected",
@@ -404,8 +462,8 @@ class ConversationOrchestrator:
                     msg_out.status = MessageStatus.SENT
                     msg_out.type = MessageType.TEXT  # converte para texto na persistência
                     msg_out.error_reason = (
-                        (msg_out.error_reason or "") + " | fallback texto enviado"
-                    )
+                        msg_out.error_reason or ""
+                    ) + " | fallback texto enviado"
                 except Exception as exc2:  # noqa: BLE001
                     msg_out.error_reason = (msg_out.error_reason or "") + (
                         f" | fallback falhou: {exc2.__class__.__name__}"

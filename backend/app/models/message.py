@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from sqlalchemy import Column, DateTime, ForeignKey, String, Text
@@ -9,7 +9,7 @@ from app.models.enums import Direction, Intent, MessageStatus, MessageType
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class Message(SQLModel, table=True):

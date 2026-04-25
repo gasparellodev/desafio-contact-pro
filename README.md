@@ -134,6 +134,24 @@ docker compose up
 2. Bubble exibe `🖼️ Imagem`; descrição via vision aparece inline.
 3. Bot responde com base na descrição + legenda.
 
+### Pause / handoff humano
+
+Quando a IA classifica `intent=human_handoff` ou `status_suggestion=needs_human`, o backend **automaticamente** pausa o bot pra aquele lead (`Lead.bot_paused=True`). A última fala da IA ainda vai (avisar o lead que vai transferir), mas próximas mensagens caem em modo skip:
+- Mensagem persistida ✓
+- Emit Socket.IO `wa.message.received` ✓
+- Reaction 👍 ✓
+- **Sem typing, sem AI, sem resposta automática.**
+
+Pra responder como humano:
+1. UI mostra badge `PAUSADO` no header da conversa pausada (PR 3 — frontend).
+2. Use o input de envio manual: digita texto + clica "Enviar como humano".
+3. Backend chama `POST /api/conversations/{id}/messages` → Evolution `send_text` → mensagem chega no celular do lead.
+4. Quando quiser que o bot volte: clica "Retomar bot" → `POST /api/leads/{id}/resume-bot` → `bot_paused=False`.
+
+### Indicador "digitando..."
+
+Antes de chamar a IA, o backend dispara `evolution.send_presence(composing, delay=8000)` no contato. O lead vê **"digitando..."** no WhatsApp enquanto a IA processa. Falha do Evolution não trava pipeline (try/except + log warning).
+
 ### Trocar de provider de IA
 
 1. Edite `.env`: `AI_PROVIDER=anthropic` e ajuste `AI_MODEL=claude-sonnet-4-6`.
@@ -255,6 +273,7 @@ Resumo no [`docs/decisions.md`](./docs/decisions.md). Os principais:
 | `401 unauthorized` na UI | `ADMIN_API_TOKEN` não preenchido em `.env` ou `VITE_ADMIN_TOKEN` no frontend não bate. Rebuild: `docker compose up -d --build frontend`. | — |
 | `502 evolution unreachable` no console | Evolution está fora do ar. `docker compose ps evolution` e logs. UI degrada para `wa: unknown` (não quebra). | — |
 | Backend não sobe (`Waiting → Recreate → Restarting`) | Conflito de porta. `docker ps` para ver quem usa 8000/5432/6379/8080. Mude `APP_PORT`/`POSTGRES_HOST_PORT`/`REDIS_HOST_PORT` no `.env`. | — |
+| Bot parou de responder pra um lead específico | `Lead.bot_paused=True` (auto-pause em handoff). Esperado. Use UI ou `curl -X POST -H "X-Admin-Token: ..." http://localhost:8000/api/leads/<id>/resume-bot` pra retomar. | — |
 | Pytest falha com `cannot connect to Docker` | Docker Desktop não está rodando — testcontainers precisa dele. | — |
 
 ---

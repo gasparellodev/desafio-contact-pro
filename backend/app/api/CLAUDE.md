@@ -57,6 +57,8 @@ api/
 | GET | `/api/conversations/{id}` | admin | Detalhe da conversa |
 | GET | `/api/conversations/{id}/messages` | admin | Mensagens cursor `before` |
 | GET | `/api/leads/{id}` | admin | Detalhe completo do lead |
+| POST | `/api/leads/{id}/resume-bot` | admin | Libera bot quando estiver pausado por handoff humano (idempotente) |
+| POST | `/api/conversations/{id}/messages` | admin | Humano envia mensagem manual (Message OUT + Evolution send_text) |
 
 ## Não fazer
 

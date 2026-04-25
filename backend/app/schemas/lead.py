@@ -29,6 +29,7 @@ class LeadSummary(BaseModel):
     phone: str | None
     service_interest: ServiceInterest
     status: LeadStatus
+    bot_paused: bool
 
 
 class LeadRead(BaseModel):
@@ -45,5 +46,6 @@ class LeadRead(BaseModel):
     lead_goal: str | None
     estimated_volume: str | None
     status: LeadStatus
+    bot_paused: bool
     created_at: datetime
     updated_at: datetime

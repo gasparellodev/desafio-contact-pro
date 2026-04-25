@@ -195,3 +195,102 @@ async def test_list_conversations_q_does_not_treat_percent_as_wildcard(
     assert response.status_code == 200
     items = response.json()["items"]
     assert {i["lead"]["name"] for i in items} == {"100% Garantia"}
+
+
+# ----- POST /api/conversations/{id}/messages (envio manual humano) -----
+
+
+class _StubEvoOK:
+    """Mock do EvolutionClient pra cenário "send_text deu certo"."""
+
+    def __init__(self):
+        self.calls: list[dict] = []
+
+    async def send_text(self, *, number: str, text: str, **_):
+        self.calls.append({"number": number, "text": text})
+        return {"key": {"id": "WA-FAKE-12345"}, "status": "ok"}
+
+
+class _StubEvoFail:
+    """Mock pra cenário "Evolution rejeitou (502 down)"."""
+
+    async def send_text(self, *_, **__):
+        from app.services.whatsapp.evolution_client import EvolutionAPIError
+
+        raise EvolutionAPIError("evolution down")
+
+
+async def test_send_manual_message_persists_out_and_calls_evolution(
+    client: AsyncClient, session: AsyncSession, monkeypatch
+):
+    _, conv = await _seed_pair(session, name="Cliente Manual")
+    stub = _StubEvoOK()
+    # Substitui o client global usado pelo endpoint.
+    from app.api.routes import conversations as conv_module
+
+    monkeypatch.setattr(conv_module, "get_evolution_client", lambda: stub)
+
+    response = await client.post(
+        f"/api/conversations/{conv.id}/messages", json={"content": "Oi, Vinicius aqui."}
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["direction"] == "out"
+    assert body["type"] == "text"
+    assert body["content"] == "Oi, Vinicius aqui."
+    assert body["status"] == "sent"
+    assert body["whatsapp_message_id"] == "WA-FAKE-12345"
+    assert len(stub.calls) == 1
+    assert stub.calls[0]["text"] == "Oi, Vinicius aqui."
+
+
+async def test_send_manual_message_502_when_evolution_fails(
+    client: AsyncClient, session: AsyncSession, monkeypatch
+):
+    _, conv = await _seed_pair(session)
+    from app.api.routes import conversations as conv_module
+
+    monkeypatch.setattr(conv_module, "get_evolution_client", lambda: _StubEvoFail())
+
+    response = await client.post(
+        f"/api/conversations/{conv.id}/messages", json={"content": "tentativa"}
+    )
+
+    assert response.status_code == 502
+
+
+async def test_send_manual_message_404_for_missing_conversation(client: AsyncClient, monkeypatch):
+    from app.api.routes import conversations as conv_module
+
+    monkeypatch.setattr(conv_module, "get_evolution_client", lambda: _StubEvoOK())
+    response = await client.post(f"/api/conversations/{uuid4()}/messages", json={"content": "hi"})
+    assert response.status_code == 404
+
+
+async def test_send_manual_message_validates_content(
+    client: AsyncClient, session: AsyncSession, monkeypatch
+):
+    _, conv = await _seed_pair(session)
+    from app.api.routes import conversations as conv_module
+
+    monkeypatch.setattr(conv_module, "get_evolution_client", lambda: _StubEvoOK())
+
+    # vazio
+    empty = await client.post(f"/api/conversations/{conv.id}/messages", json={"content": ""})
+    assert empty.status_code == 422
+    # > 4096 chars
+    too_long = await client.post(
+        f"/api/conversations/{conv.id}/messages", json={"content": "x" * 5000}
+    )
+    assert too_long.status_code == 422
+
+
+async def test_send_manual_message_requires_admin_token(client: AsyncClient, session: AsyncSession):
+    _, conv = await _seed_pair(session)
+    response = await client.post(
+        f"/api/conversations/{conv.id}/messages",
+        json={"content": "hi"},
+        headers={"X-Admin-Token": ""},
+    )
+    assert response.status_code == 401
