@@ -19,4 +19,12 @@ export default defineConfig([
       globals: globals.browser,
     },
   },
+  {
+    // Fast Refresh não roda em arquivos de teste / helpers de teste — desligar
+    // a regra que pediria splitar componentes vs utilitários por arquivo.
+    files: ['**/*.{test,spec}.{ts,tsx}', 'src/test/**/*.{ts,tsx}'],
+    rules: {
+      'react-refresh/only-export-components': 'off',
+    },
+  },
 ])

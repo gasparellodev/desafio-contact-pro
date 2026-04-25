@@ -22,32 +22,48 @@ Inbox web em tempo real para acompanhar conversas do chatbot WhatsApp. Lista de 
 ## Princípios não-negociáveis
 
 1. **shadcn-only para UI primitives.** Nunca crie um `<button>` cru, sempre `Button`. Mesma regra para Card, Badge, ScrollArea, etc. Se faltar primitive, copie do shadcn registry para `src/components/ui/`.
-2. **Strict TypeScript.** Sem `any`, sem `@ts-ignore`. Tipos compartilhados de eventos Socket.IO em `src/types/`.
-3. **Singleton do Socket.IO.** Cliente vive **fora de qualquer componente** (em `src/lib/socket.ts`) com `autoConnect: false`. Hooks chamam `socket.connect()` no mount e `socket.disconnect()` no cleanup do `useEffect`. Sem isso, StrictMode duplica conexão em dev.
-4. **API sem fetch dentro de componente.** Use hooks (`useConversations`, `useLead`, etc.) em `src/hooks/`. Componente só consome estado.
-5. **Acessibilidade básica.** `aria-*` em botões só com ícone, `role="status"` no indicador "IA pensando".
+2. **Strict TypeScript.** Sem `any`, sem `@ts-ignore`. Tipos compartilhados de eventos Socket.IO e schemas REST em `src/types/`.
+3. **Singleton do Socket.IO.** Cliente vive **fora de qualquer componente** (em `src/lib/socket.ts`) com `autoConnect: false`. Apenas o `SocketProvider` chama `socket.connect()` (no mount). Componentes/hooks consomem estado via `useSocketContext()` ou via cache TanStack Query.
+4. **TanStack Query é a fonte da verdade dos dados de servidor.** `fetch` direto em componente é proibido. Hooks de domínio (`useConversationsQuery`, `useConversationMessages`, `useLead`) usam `useQuery`; eventos Socket.IO chamam `queryClient.setQueryData(...)` para mesclar deltas (no `SocketProvider`, não nos hooks).
+5. **URL é a fonte da verdade do `activeId`.** A rota `/conversations/:id` reflete a conversa aberta. Reload preserva. Navegação via `useNavigate()`, leitura via `useParams()`.
+6. **Acessibilidade.** `aria-*` em botões só com ícone, `role="status"` em indicadores temporários, foco gerenciado em rotas. Phase 4 vai validar com `axe-core` em testes (zero violations).
 
 ## Estrutura
 
 ```
 src/
-  main.tsx
-  App.tsx
+  main.tsx                      # entry: StrictMode > QueryProvider > SocketProvider > RouterProvider
   components/
-    ui/                    # shadcn primitives (button, card, badge, scroll-area, separator, avatar)
-    chat/                  # ConversationList, MessageList, MessageBubble, AudioMessage, ImageMessage, AIThinkingIndicator
-    lead/                  # LeadPanel
-    connection/            # QRCodePanel, ConnectionStatus
+    ui/                         # shadcn primitives (button, card, badge, scroll-area, separator, avatar)
+    chat/                       # ConversationList, MessageList, MessageBubble, AudioMessage, ImageMessage, AIThinkingIndicator
+    lead/                       # LeadPanel
+    connection/                 # QRCodePanel, ConnectionStatus
   hooks/
-    useSocket.ts
-    useConversations.ts
-    useConnectionStatus.ts
+    useConnectionStatus.ts      # re-export do SocketProvider context
+    useConversationsQuery.ts    # useQuery(['conversations', 'list', filters])
+    useConversationMessages.ts  # useQuery(['conversations', 'detail', id, 'messages'])
+    useLead.ts                  # useQuery(['leads', 'detail', id])
+  providers/
+    QueryProvider.tsx           # QueryClientProvider (devtools lazy só em DEV)
+    SocketProvider.tsx          # singleton socket + handlers escrevem em queryClient
+    socket-context.ts           # Context + useSocketContext() (separado para react-refresh)
   lib/
-    api.ts                 # wrapper fetch para REST
-    socket.ts              # singleton Socket.IO
-    utils.ts               # cn()
-  types/                   # tipos compartilhados (Message, Lead, eventos socket)
-  index.css                # @import tailwindcss + theme tokens (OKLCH)
+    api.ts                      # fetch wrapper + typed fetchers (fetchConversations, etc.)
+    queryKeys.ts                # factory de query keys do TanStack
+    query-client.ts             # makeQueryClient() (defaults: staleTime 60s, retry 1)
+    socket.ts                   # singleton Socket.IO (autoConnect: false)
+    utils.ts                    # cn()
+  routes/
+    index.tsx                   # createBrowserRouter (/, /conversations, /conversations/:id, *)
+    root.tsx                    # layout shell (header + Outlet)
+    conversations.tsx           # rota /conversations(/:id) — lista + (centro+lead)
+    conversation.tsx            # ConversationView (centro + lead) reusada em /:id
+    not-found.tsx               # 404
+  test/
+    setup.ts                    # jest-dom + cleanup
+    test-utils.tsx              # renderWithProviders + makeTestQueryClient
+  types/                        # tipos compartilhados (Message, Lead, eventos socket, REST envelopes)
+  index.css                     # @import tailwindcss + theme tokens (OKLCH)
 ```
 
 ## Comandos
@@ -73,16 +89,26 @@ npm run test:coverage  # vitest run --coverage (relatório v8)
 
 ## Como adicionar um event listener Socket.IO
 
-1. Tipar o evento em `src/types/socket.ts` (se ainda não estiver)
-2. No hook (`useConversations`, etc.), usar:
-   ```ts
-   useEffect(() => {
-     const handler = (data: T) => setState(...)
-     socket.on('event.name', handler)
-     return () => { socket.off('event.name', handler) }
-   }, [])
-   ```
-3. Nunca `.on()` sem `.off()` — vaza memória e dispara handler N vezes em StrictMode.
+1. Tipar o evento em `src/types/socket.ts` (se ainda não estiver).
+2. **Não** crie um novo `.on(...)` em hook ou componente. Adicione o handler dentro do `SocketProvider` em `src/providers/SocketProvider.tsx`:
+   - Se o evento atualiza dados de servidor, chame `queryClient.setQueryData(...)` ou `queryClient.invalidateQueries(...)` com a query key apropriada de `lib/queryKeys.ts`.
+   - Se for estado efêmero da UI (ex: indicador "IA pensando"), atualize o `useState` interno do provider e exponha via `useSocketContext()`.
+3. Adicione o `.off(handler)` correspondente no cleanup do mesmo `useEffect`. Nunca `.on()` sem `.off()` — vaza memória e duplica handler em StrictMode.
+
+## Como adicionar um endpoint REST
+
+1. Adicionar typed fetcher em `src/lib/api.ts` (`fetchFoo(...)`).
+2. Adicionar key factory em `src/lib/queryKeys.ts` (`fooKeys.detail(id)`).
+3. Criar hook em `src/hooks/useFoo.ts` que chama `useQuery({ queryKey, queryFn })`.
+4. Atualizar tipos em `src/types/domain.ts` (response payload).
+5. Co-locar teste `useFoo.test.tsx` mockando `fetch` global via `vi.stubGlobal`.
+
+## Como adicionar uma rota
+
+1. Criar `src/routes/<nome>.tsx` exportando o componente da página.
+2. Registrar em `src/routes/index.tsx` no array de `createBrowserRouter`.
+3. Usar `useParams()` para ler segmentos dinâmicos, `useNavigate()` para mudar de rota.
+4. Layout compartilhado (`<Outlet />`) está em `routes/root.tsx`.
 
 ## Tailwind v4 vs v3
 

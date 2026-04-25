@@ -72,3 +72,38 @@ export interface Message {
 }
 
 export type ConnectionState = 'open' | 'connecting' | 'close' | 'unknown'
+
+// Schemas REST (espelha backend/app/schemas/{lead,conversation}.py).
+
+export interface LeadSummary {
+  id: string
+  whatsapp_jid: string
+  name: string | null
+  phone: string | null
+  service_interest: ServiceInterest
+  status: LeadStatus
+}
+
+export interface ConversationListItem {
+  id: string
+  lead: LeadSummary
+  last_intent: Intent | null
+  last_message_at: string
+  created_at: string
+}
+
+export type ConversationDetail = ConversationListItem
+
+export interface ConversationListResponse {
+  items: ConversationListItem[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface MessagePageResponse {
+  items: Message[]
+  next_before: string | null
+  next_before_id: string | null
+  limit: number
+}

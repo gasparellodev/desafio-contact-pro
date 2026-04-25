@@ -15,11 +15,15 @@ __pycache__/
 .Python
 build/
 develop-eggs/
-dist/
+/dist/
+backend/dist/
 downloads/
 eggs/
 .eggs/
-lib/
+# `lib/` em qualquer canto do tree é um diretório Python típico de venv/build.
+# Mas o frontend usa `frontend/src/lib/` para utilitários TS. Reescrevo a regra
+# para ignorar lib/ APENAS na raiz e não mais em qualquer subpasta.
+/lib/
 lib64/
 parts/
 sdist/

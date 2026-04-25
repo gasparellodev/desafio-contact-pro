@@ -482,3 +482,46 @@ npm run test             # 3/3 passed em ~1s
 - Plano original sugeria criar todos os providers/rotas nesta PR — separei em Phase 2 para PR menor e mais revisável.
 
 **Tempo:** ~25min.
+
+---
+
+## 2026-04-25 17:00 — PR #50 / Issue #49: Providers + React Router + refator pra TanStack Query (Spec A — Phase 2 frontend)
+
+**Contexto:** segunda PR do Spec A. Funda a arquitetura: providers (QueryProvider + SocketProvider), rotas (React Router 7), hooks de domínio (TanStack Query) consumindo os endpoints REST do PR #46. Resolve a perda de contexto no reload (URL como fonte da verdade do `activeId`) sem mudar layout (Phase 3 cuida da responsividade).
+
+**Decisões:**
+- **Hierarquia em main.tsx**: `StrictMode > QueryProvider > SocketProvider > RouterProvider`. SocketProvider INSIDE QueryProvider porque escreve no `queryClient`.
+- **`SocketProvider`** é um único ponto de assinatura — antes, cada hook fazia `socket.on/off`; agora um único `useEffect` centraliza handlers e roteia eventos: mensagens viram `setQueryData([conversations, detail, id, messages])`, `lead.updated` vira `setQueryData([leads, detail, id])` + patch do `LeadSummary` embutido na lista. Estado efêmero (`waState`, `qrcode`, `thinking`) fica no `useState` interno do provider.
+- **Rotas**: `/` → redirect `/conversations`, `/conversations` (lista), `/conversations/:id` (chat + lead), `*` (404). Layout 3-6-3 mantido; F5 preserva conversa aberta.
+- **Hooks TanStack Query**: `useConversationsQuery`, `useConversationMessages(id?)` (enabled when id), `useLead(id?)` (enabled when id). Defaults sensatos no `makeQueryClient`: `staleTime 60s`, `gcTime 5min`, `retry 1`, `refetchOnWindowFocus: false` (Socket.IO já mantém fresco).
+- **Idempotência por id**: `appendMessageToCache` ignora mensagem com mesmo `id` (Evolution pode redeliver via webhook → orchestrator → socket).
+- **Apaga `useConversations.ts` e `useSocket.ts`** (substituídos pelo provider). `useConnectionStatus.ts` vira fino re-export.
+- **`react-refresh/only-export-components`**: split de `query-client.ts`, `socket-context.ts` em arquivos próprios. Override em `eslint.config.js` ignora a regra em `**/*.test.*` e `src/test/**`.
+- **`vercel:react-best-practices`** aplicado: dynamic import (`React.lazy`) + Suspense para `ReactQueryDevtools` (Vite tree-shake em build prod, padrão correto se DEV check falhar); `useMemo` em `adaptListItem` para evitar reconstrução de array a cada re-render.
+- **Testes**: 19 testes co-located cobrindo `queryKeys` (estabilidade + hierarquia), `useConversationsQuery` (chama URL certo, passa filtros via query string), `useConversationMessages` (enabled flag funciona), `useLead`, `QueryProvider` (injeta cliente para children), `SocketProvider` (mescla mensagens, dedupa por id, patcha transcription, atualiza Lead em ambos os caches, expõe estado via Context). Total: **20 testes passando em ~1.4s** (incluindo o sanity removido na Phase 1).
+
+**Dificuldades:**
+- `vi.mock('@/lib/socket', () => ({ socket: fakeSocket }))` falhou com `Cannot access 'fakeSocket' before initialization` — o `vi.mock` é hoisted antes dos imports. Fix: usar `vi.hoisted(() => ({ fakeSocket, handlers }))` para construir o fake antes do mock factory.
+
+**Trade-offs:**
+- Mantive layout desktop (3-6-3 grid hardcoded) — responsividade fica para Phase 3 onde `frontend-design` define a identidade. PR menor e revisável.
+- `useConversationMessages` é `useQuery` simples (uma página de 50). `useInfiniteQuery` para scroll-up infinito chega na Phase 4 com cursor `(before, before_id)`.
+- Bundle cresceu de 302KB para 432KB (94KB → 135KB gzip) por causa de Router + Query + DevTools (lazy). Aceitável para Phase 2; Phase 4 fará code splitting por rota.
+
+**Sugestões da IA rejeitadas/alteradas:**
+- IA propôs `useThinking()` como hook separado de `useSocketContext()`. Mantive como propriedade do mesmo Context — menos APIs, mesmo custo de re-render dado o `useMemo`.
+- IA sugeriu `<Routes>` com componentes inline. Usei `createBrowserRouter` (recomendado em React Router 7).
+
+**Smoke test:**
+```bash
+cd frontend
+npm run typecheck   # OK
+npm run build       # 237ms, 432KB / gzip 135KB
+npm run lint        # 3 erros pré-existentes (button.tsx, badge.tsx, QRCodePanel set-state-in-effect)
+npm run test        # 20/20 passing in 1.4s
+docker compose up -d --build frontend
+curl -s http://localhost:5173/                         # HTTP 200
+curl -s http://localhost:5173/conversations/abc-123    # HTTP 200 (SPA fallback)
+```
+
+**Tempo:** ~60min.
