@@ -222,3 +222,33 @@ Formato:
 **Tempo gasto:** ~10 min
 
 **Smoke test:** `npm run build` → tsc strict + Vite verde.
+
+---
+
+## 2026-04-25 12:25 — PR #8: AI provider abstraction + KB Contact Pro
+
+**Decisões:**
+- `base.py`: `AIProvider` Protocol com 2 métodos (`generate_response`, `describe_image`). Output sempre `AIResponse{reply, intent, lead_extracted, status_suggestion}` Pydantic.
+- `OpenAIProvider`: `client.chat.completions.parse(response_format=AIResponse)` — pattern recomendado em 2026 (mais robusto que `response_format={"type":"json_schema",...}` cru).
+- `AnthropicProvider`: `tool_choice={"type":"tool","name":"emit_response"}` forçado, com `input_schema` JSON espelho do `AIResponse`. System prompt em block list com `cache_control: ephemeral` (reduz custo da KB ~90% após 1ª chamada).
+- `factory.py:get_ai_provider()` lru_cache lê `settings.ai_provider`. Outros módulos só importam o factory.
+- `knowledge_base/contact_pro.md` cobre os 5 serviços + tom + regras de qualificação.
+- `prompts.py:build_system_prompt` concatena regras + KB; lru_cache.
+
+**Dificuldades:**
+- Path da KB falhou no primeiro smoke (faltava 1 nível de `parent`); corrigido para `parent.parent.parent` a partir de `prompts.py`.
+- Anthropic tool_use schema precisa replicar exatamente os enums do desafio — qualquer divergência rejeitaria a resposta. Replicado à mão; futuro: gerar a partir do Pydantic via `model_json_schema()`.
+
+**Trade-offs:**
+- Sem chamada real à OpenAI/Anthropic ainda (sem chaves nesta máquina). Validação acontece com smoke do compose-up + chave do usuário.
+- Vision usa o mesmo provider escolhido em `AI_PROVIDER` — mais simples que ter um terceiro env. Se o usuário usar Anthropic + quiser GPT vision, terá que fazer override manual.
+
+**Sugestões da IA rejeitadas/alteradas:**
+- IA inicial sugeriu adicionar `cache_control` em todo bloco system. Mantive só no bloco da KB (reduz miss em cache invalidation).
+- IA sugeriu `temperature=0.7` para conversação; rebaixei para 0.4 (mais previsível, ainda natural).
+
+**Tempo gasto:** ~25 min
+
+**Smoke test:** `from app.services.ai.factory import get_ai_provider` + `build_system_prompt()` retorna 4307 chars; AIResponse fields batem.
+
+**Pendente:** smoke test real com chave (próxima fase no compose-up).
