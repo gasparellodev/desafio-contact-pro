@@ -15,7 +15,6 @@ Cérebro do sistema. Recebe `ParsedMessage` do webhook Evolution e administra to
 5. **Reaction 👍 é fire-and-forget.** Falha não interrompe o pipeline (apenas loga warning).
 6. **Smart reaction final** depende do `status` do lead pós-AI: ✅ qualified, 👌 opt_out, 🤝 needs_human, 👍 new.
 7. **Histórico tem cap de 12 mensagens** (`HISTORY_LIMIT`) para controlar custo de prompt e latência.
-8. **Whitelist de números** (`WHATSAPP_ALLOWED_NUMBERS` env) — quando preenchida, mensagens de números fora da lista são ignoradas em silêncio (não persiste, não reage, não chama IA). Vazia = sem filtro.
 
 ### Pipeline (texto)
 
