@@ -401,13 +401,19 @@ class ConversationOrchestrator:
         self._apply_extracted_to_lead(lead, ai_resp)
         if ai_resp.status_suggestion:
             lead.status = ai_resp.status_suggestion
-        # Auto-pause em handoff humano OU em orçamento.
-        # PRICING entra também porque consultor humano monta orçamento (bot
-        # tava entrando em loop tentando responder com dado que não tem).
-        if (
-            ai_resp.intent in {Intent.HUMAN_HANDOFF, Intent.PRICING}
+        # Auto-pause em handoff humano OU em orçamento JÁ QUALIFICADO.
+        # HUMAN_HANDOFF / NEEDS_HUMAN são gatilhos imediatos (lead pediu humano
+        # explicitamente, ou IA detectou frustração).
+        # PRICING SÓ pausa quando lead está qualificado (name + interesse +
+        # contexto) — caso contrário o bot continua qualificando antes de
+        # transferir. Sem isso, primeira mensagem "qual o preço?" pausaria
+        # imediato e consultor receberia uma conversa sem dados (loop).
+        should_pause = (
+            ai_resp.intent == Intent.HUMAN_HANDOFF
             or ai_resp.status_suggestion == LeadStatus.NEEDS_HUMAN
-        ):
+            or (ai_resp.intent == Intent.PRICING and self._is_lead_qualified(lead))
+        )
+        if should_pause:
             lead.bot_paused = True
             logger.info(
                 "orchestrator_auto_paused",
@@ -714,13 +720,19 @@ class ConversationOrchestrator:
         # 7.5 AUTO-PAUSE em handoff humano. A última fala da IA ainda vai
         # (pra avisar o lead que vai transferir), mas próxima mensagem cai
         # no skip-when-paused acima.
-        # Auto-pause em handoff humano OU em orçamento.
-        # PRICING entra também porque consultor humano monta orçamento (bot
-        # tava entrando em loop tentando responder com dado que não tem).
-        if (
-            ai_resp.intent in {Intent.HUMAN_HANDOFF, Intent.PRICING}
+        # Auto-pause em handoff humano OU em orçamento JÁ QUALIFICADO.
+        # HUMAN_HANDOFF / NEEDS_HUMAN são gatilhos imediatos (lead pediu humano
+        # explicitamente, ou IA detectou frustração).
+        # PRICING SÓ pausa quando lead está qualificado (name + interesse +
+        # contexto) — caso contrário o bot continua qualificando antes de
+        # transferir. Sem isso, primeira mensagem "qual o preço?" pausaria
+        # imediato e consultor receberia uma conversa sem dados (loop).
+        should_pause = (
+            ai_resp.intent == Intent.HUMAN_HANDOFF
             or ai_resp.status_suggestion == LeadStatus.NEEDS_HUMAN
-        ):
+            or (ai_resp.intent == Intent.PRICING and self._is_lead_qualified(lead))
+        )
+        if should_pause:
             lead.bot_paused = True
             logger.info(
                 "orchestrator_auto_paused",
@@ -963,6 +975,26 @@ class ConversationOrchestrator:
             )
         except EvolutionAPIError as exc:
             logger.warning("smart_reaction_failed", extra={"error": str(exc), "emoji": emoji})
+
+    @staticmethod
+    def _is_lead_qualified(lead: Lead) -> bool:
+        """Lead pronto pro consultor montar orçamento.
+
+        Critério mínimo: nome + serviço de interesse + (objetivo OU volume).
+        Sem isso, consultor receberia conversa "fria" sem contexto e teria
+        que perguntar tudo de novo. Bot deve qualificar antes de transferir.
+
+        Não exige `company` (lead PF cabe) nem `phone` (já vem do JID).
+        """
+        if not lead.name or not lead.name.strip():
+            return False
+        if lead.service_interest in (None, ServiceInterest.UNKNOWN):
+            return False
+        has_context = bool(
+            (lead.lead_goal and lead.lead_goal.strip())
+            or (lead.estimated_volume and lead.estimated_volume.strip())
+        )
+        return has_context
 
     @staticmethod
     def _apply_extracted_to_lead(lead: Lead, ai_resp: AIResponse) -> None:
