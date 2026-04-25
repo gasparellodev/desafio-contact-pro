@@ -41,6 +41,7 @@ from app.services.ai.base import AIProvider, AIResponse, ChatTurn
 from app.services.ai.factory import get_ai_provider
 from app.services.ai.prompts import build_system_prompt
 from app.services.transcription.openai_stt import OpenAITranscriber, get_transcriber
+from app.services.tts.openai_tts import OpenAITTS, get_tts
 from app.services.whatsapp.evolution_client import (
     EvolutionAPIError,
     EvolutionClient,
@@ -98,11 +99,13 @@ class ConversationOrchestrator:
         ai: AIProvider | None = None,
         whatsapp: EvolutionClient | None = None,
         transcriber: OpenAITranscriber | None = None,
+        tts: OpenAITTS | None = None,
     ) -> None:
         self.session = session
         self.ai = ai or get_ai_provider()
         self.whatsapp = whatsapp or get_evolution_client()
         self.transcriber = transcriber or get_transcriber()
+        self.tts = tts or get_tts()
 
     # ----- repository helpers (inline para 6h) -----
 
@@ -274,11 +277,12 @@ class ConversationOrchestrator:
         self.session.add(lead)
         self.session.add(conv)
 
-        # 8. persist OUT
+        # 8. persist OUT — se entrada foi áudio, responder em áudio
+        out_type = MessageType.AUDIO if parsed.message_type == MessageType.AUDIO else MessageType.TEXT
         msg_out = Message(
             conversation_id=conv.id,
             direction=Direction.OUT,
-            type=MessageType.TEXT,
+            type=out_type,
             content=ai_resp.reply,
             intent=ai_resp.intent,
             status=MessageStatus.PENDING,
@@ -299,47 +303,81 @@ class ConversationOrchestrator:
             str(conv.id), "ai.response.generated", _msg_to_dict(msg_out)
         )
 
-        # 10. envio para o WhatsApp (texto, com quoted)
+        # 10. envio para o WhatsApp (texto OR áudio com TTS, com quoted)
         try:
-            send_result = await self.whatsapp.send_text(
-                number=jid_to_phone(parsed.remote_jid),
-                text=ai_resp.reply,
-                quoted={
-                    "key": {
-                        "remoteJid": parsed.remote_jid,
-                        "fromMe": False,
-                        "id": parsed.whatsapp_message_id,
+            if out_type == MessageType.AUDIO:
+                send_result = await self._send_audio_reply(parsed=parsed, reply_text=ai_resp.reply)
+                msg_out.media_mime = f"audio/ogg; codecs={self.tts.format}"
+            else:
+                send_result = await self.whatsapp.send_text(
+                    number=jid_to_phone(parsed.remote_jid),
+                    text=ai_resp.reply,
+                    quoted={
+                        "key": {
+                            "remoteJid": parsed.remote_jid,
+                            "fromMe": False,
+                            "id": parsed.whatsapp_message_id,
+                        },
+                        "message": {"conversation": parsed.text or ""},
                     },
-                    "message": {"conversation": parsed.text or ""},
-                },
-            )
+                )
             wa_id = (send_result.get("key") or {}).get("id") if isinstance(send_result, dict) else None
             msg_out.whatsapp_message_id = wa_id
             msg_out.status = MessageStatus.SENT
         except EvolutionAPIError as exc:
-            logger.exception("send_text_failed", extra={"error": str(exc)})
+            logger.exception("send_failed", extra={"error": str(exc), "type": out_type.value})
             msg_out.status = MessageStatus.FAILED
             msg_out.error_reason = str(exc)
             await emit_global(
                 "error",
                 {
-                    "code": "send_text_failed",
+                    "code": f"send_{out_type.value}_failed",
                     "message": str(exc),
                     "conversation_id": str(conv.id),
                 },
             )
+            # Fallback: se áudio falhou, tenta enviar como texto
+            if out_type == MessageType.AUDIO:
+                try:
+                    await self.whatsapp.send_text(
+                        number=jid_to_phone(parsed.remote_jid),
+                        text=ai_resp.reply,
+                    )
+                    msg_out.status = MessageStatus.SENT
+                    msg_out.error_reason = (msg_out.error_reason or "") + " | fallback texto enviado"
+                except EvolutionAPIError as exc2:
+                    msg_out.error_reason = (msg_out.error_reason or "") + f" | fallback falhou: {exc2}"
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("send_unexpected", extra={"error": str(exc)})
+            msg_out.status = MessageStatus.FAILED
+            msg_out.error_reason = str(exc)
         finally:
             self.session.add(msg_out)
             await self.session.commit()
             await self.session.refresh(msg_out)
-            await emit_to_conversation(
-                str(conv.id), "wa.message.sent", _msg_to_dict(msg_out)
-            )
+            event_name = "wa.audio.sent" if out_type == MessageType.AUDIO else "wa.message.sent"
+            await emit_to_conversation(str(conv.id), event_name, _msg_to_dict(msg_out))
 
         # 11. smart reaction baseado em status
         await self._send_smart_reaction(parsed, self._reaction_for_status(lead.status))
 
     # ----- helpers -----
+
+    async def _send_audio_reply(self, *, parsed: ParsedMessage, reply_text: str) -> dict:
+        """Gera TTS e envia como PTT via Evolution. Retorna a resposta crua do Evolution."""
+        import base64
+
+        audio_bytes = await self.tts.synthesize(
+            text=reply_text,
+            instructions=(
+                "Tom cordial, profissional, ritmo natural. Voz de assistente comercial brasileiro."
+            ),
+        )
+        audio_b64 = base64.b64encode(audio_bytes).decode("ascii")
+        return await self.whatsapp.send_audio(
+            number=jid_to_phone(parsed.remote_jid),
+            audio_base64=audio_b64,
+        )
 
     async def _transcribe_audio(self, parsed: ParsedMessage) -> str:
         """Baixa o áudio (se ainda não veio em base64) e transcreve via Whisper."""
