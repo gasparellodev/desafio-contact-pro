@@ -122,6 +122,7 @@ services:
       EVOLUTION_INSTANCE: ${EVOLUTION_INSTANCE:-contactpro}
       EVOLUTION_WEBHOOK_URL: ${EVOLUTION_WEBHOOK_URL:-http://backend:8000/api/webhooks/evolution}
       SOCKET_CORS_ORIGINS: ${SOCKET_CORS_ORIGINS:-http://localhost:5173}
+      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN}
     ports:
       - "${APP_PORT:-8000}:8000"
     healthcheck:
@@ -135,6 +136,9 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+        VITE_ADMIN_TOKEN: ${VITE_ADMIN_TOKEN}
     container_name: contactpro-frontend
     depends_on:
       backend:

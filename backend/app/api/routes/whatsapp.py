@@ -6,11 +6,17 @@ da instância na primeira execução. As chamadas são proxy para o Evolution.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from app.api.security import require_admin_token
 from app.services.whatsapp.evolution_client import EvolutionAPIError, get_evolution_client
 
-router = APIRouter(prefix="/api/whatsapp", tags=["whatsapp"])
+# Todas as rotas exigem `X-Admin-Token` (issue #33). Vazio em settings = 503.
+router = APIRouter(
+    prefix="/api/whatsapp",
+    tags=["whatsapp"],
+    dependencies=[Depends(require_admin_token)],
+)
 
 
 @router.post("/instance")
@@ -31,7 +37,13 @@ async def get_qrcode() -> dict:
     try:
         return await client.connect()
     except EvolutionAPIError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        # Não vaza str(exc) (URLs internas / hints SQL); detalhe completo vai para o log.
+        import logging
+
+        logging.getLogger(__name__).exception(
+            "evolution_proxy_error", extra={"error_class": exc.__class__.__name__}
+        )
+        raise HTTPException(status_code=502, detail="evolution unreachable") from exc
 
 
 @router.get("/connection")
@@ -40,7 +52,13 @@ async def get_connection_state() -> dict:
     try:
         return await client.connection_state()
     except EvolutionAPIError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        # Não vaza str(exc) (URLs internas / hints SQL); detalhe completo vai para o log.
+        import logging
+
+        logging.getLogger(__name__).exception(
+            "evolution_proxy_error", extra={"error_class": exc.__class__.__name__}
+        )
+        raise HTTPException(status_code=502, detail="evolution unreachable") from exc
 
 
 @router.post("/webhook")
@@ -56,4 +74,10 @@ async def setup_webhook() -> dict:
             base64=True,
         )
     except EvolutionAPIError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        # Não vaza str(exc) (URLs internas / hints SQL); detalhe completo vai para o log.
+        import logging
+
+        logging.getLogger(__name__).exception(
+            "evolution_proxy_error", extra={"error_class": exc.__class__.__name__}
+        )
+        raise HTTPException(status_code=502, detail="evolution unreachable") from exc
