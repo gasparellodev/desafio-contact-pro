@@ -198,3 +198,27 @@ Formato:
 - Webhook autorização (apenas `apikey` opcional + rede interna)
 - Sanitização do `remote_jid` antes de logar (PII)
 - Limite de tamanho do body (`fastapi` default é sem limite)
+
+---
+
+## 2026-04-25 12:05 — PR #7: Socket.IO frontend client + tipos compartilhados
+
+**Decisões:**
+- `lib/socket.ts`: singleton `Socket<ServerToClientEvents, ClientToServerEvents>` fora de qualquer componente, `autoConnect: false`, transports `[websocket, polling]`, reconnect infinito com backoff 500ms→5s — pattern obrigatório para sobreviver ao double-mount do StrictMode.
+- `types/domain.ts` espelha enums e modelos do backend; `types/socket.ts` declara contratos de 12 eventos (alinhados com a lista do plano).
+- `hooks/useSocket` controla connect/disconnect; o cleanup **não** desconecta para preservar conexão entre re-mounts do StrictMode (pattern oficial).
+- `hooks/useConnectionStatus` reage a `wa.connection.update` e `wa.qrcode.updated`.
+- `lib/api.ts` wrapper minimalista de `fetch` (URL configurável via `VITE_API_URL`); sem react-query (escopo).
+
+**Dificuldades:**
+- Nenhuma — pattern oficial das docs cumpriu o caso.
+
+**Trade-offs:**
+- Sem `import.meta.env.VITE_API_URL` por padrão — fallback para `http://localhost:8000`. Documentar no README final como customizar.
+
+**Sugestões da IA rejeitadas/alteradas:**
+- IA sugeriu mover singleton para um React Context. Rejeitado: o singleton fora do componente é mais simples, evita re-render em consumidores que só precisam de `socket.emit`.
+
+**Tempo gasto:** ~10 min
+
+**Smoke test:** `npm run build` → tsc strict + Vite verde.
