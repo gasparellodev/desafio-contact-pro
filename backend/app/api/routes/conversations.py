@@ -11,7 +11,7 @@ from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.security import require_admin_token
@@ -39,14 +39,32 @@ router = APIRouter(
 )
 
 
+def _escape_like(s: str) -> str:
+    """Escapa wildcards de LIKE para que `q` seja sempre substring literal.
+
+    Sem isso, `q=%` retorna tudo e `q=foo_bar` casa com `fooXbar` — comportamento
+    surpreendente para um campo declarado como busca, mesmo em endpoint admin.
+    """
+    return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _build_conversation_payload(conversation: Conversation, lead: Lead) -> dict:
+    """Campos compartilhados entre `ConversationListItem` e `ConversationRead`."""
+    return {
+        "id": conversation.id,
+        "lead": LeadSummary.model_validate(lead),
+        "last_intent": conversation.last_intent,
+        "last_message_at": conversation.last_message_at,
+        "created_at": conversation.created_at,
+    }
+
+
 def _conversation_item(conversation: Conversation, lead: Lead) -> ConversationListItem:
-    return ConversationListItem(
-        id=conversation.id,
-        lead=LeadSummary.model_validate(lead),
-        last_intent=conversation.last_intent,
-        last_message_at=conversation.last_message_at,
-        created_at=conversation.created_at,
-    )
+    return ConversationListItem(**_build_conversation_payload(conversation, lead))
+
+
+def _conversation_read(conversation: Conversation, lead: Lead) -> ConversationRead:
+    return ConversationRead(**_build_conversation_payload(conversation, lead))
 
 
 @router.get("", response_model=ConversationList)
@@ -72,16 +90,28 @@ async def list_conversations(
     if status is not None:
         base_filters.append(Lead.status == status.value)
     if q:
-        like = f"%{q}%"
+        like = f"%{_escape_like(q)}%"
         base_filters.append(
-            or_(Lead.name.ilike(like), Lead.phone.ilike(like), Lead.whatsapp_jid.ilike(like))
+            or_(
+                Lead.name.ilike(like, escape="\\"),
+                Lead.phone.ilike(like, escape="\\"),
+                Lead.whatsapp_jid.ilike(like, escape="\\"),
+            )
         )
 
-    count_stmt = (
-        select(func.count())
-        .select_from(Conversation)
-        .join(Lead, Lead.id == Conversation.lead_id)
-    )
+    # Count: só faz JOIN com Lead se houver filtro que exija. No caso default
+    # (sem status/q) basta contar Conversation direto e poupar o scan.
+    if base_filters:
+        count_stmt = (
+            select(func.count())
+            .select_from(Conversation)
+            .join(Lead, Lead.id == Conversation.lead_id)
+        )
+        for f in base_filters:
+            count_stmt = count_stmt.where(f)
+    else:
+        count_stmt = select(func.count(Conversation.id))
+
     items_stmt = (
         select(Conversation, Lead)
         .join(Lead, Lead.id == Conversation.lead_id)
@@ -90,7 +120,6 @@ async def list_conversations(
         .offset(offset)
     )
     for f in base_filters:
-        count_stmt = count_stmt.where(f)
         items_stmt = items_stmt.where(f)
 
     total = (await session.execute(count_stmt)).scalar_one()
@@ -115,13 +144,7 @@ async def get_conversation(
     if row is None:
         raise HTTPException(status_code=404, detail="conversation not found")
     conversation, lead = row
-    return ConversationRead(
-        id=conversation.id,
-        lead=LeadSummary.model_validate(lead),
-        last_intent=conversation.last_intent,
-        last_message_at=conversation.last_message_at,
-        created_at=conversation.created_at,
-    )
+    return _conversation_read(conversation, lead)
 
 
 @router.get("/{conversation_id}/messages", response_model=MessagePage)
@@ -130,16 +153,24 @@ async def list_messages(
     session: AsyncSession = Depends(get_session),
     before: datetime | None = Query(
         default=None,
-        description="Cursor: retorna mensagens com created_at < before. Omitir = mais recentes.",
+        description="Cursor primário: retorna mensagens com created_at < before.",
+    ),
+    before_id: UUID | None = Query(
+        default=None,
+        description=(
+            "Tie-breaker do cursor. Combinado com `before`, usa comparação de "
+            "tupla (created_at, id) < (before, before_id) para evitar pular "
+            "mensagens com timestamp idêntico."
+        ),
     ),
     limit: int = Query(default=DEFAULT_LIMIT, ge=1, le=MAX_LIMIT),
 ) -> MessagePage:
     """Página de mensagens em ordem cronológica ascendente.
 
-    A query interna pega `limit` mensagens mais recentes (descendente) usando o
-    cursor `before`, e devolve invertidas para o cliente renderizar de cima
-    para baixo. Para "carregar mais" (scroll-up), o cliente passa
-    `before=next_before` retornado.
+    Internamente pega `limit` mensagens mais recentes em ordem descendente e
+    devolve invertidas para o cliente renderizar do mais antigo ao mais novo.
+    Para "carregar mais" (scroll-up), o cliente passa o par
+    `before=next_before` + `before_id=next_before_id` retornado.
     """
     exists = (
         await session.execute(select(Conversation.id).where(Conversation.id == conversation_id))
@@ -150,18 +181,25 @@ async def list_messages(
     stmt = (
         select(Message)
         .where(Message.conversation_id == conversation_id)
-        .order_by(Message.created_at.desc())
+        .order_by(Message.created_at.desc(), Message.id.desc())
         .limit(limit)
     )
-    if before is not None:
+    if before is not None and before_id is not None:
+        # Tupla evita pular mensagens com created_at idêntico (race IN/OUT).
+        stmt = stmt.where(tuple_(Message.created_at, Message.id) < tuple_(before, before_id))
+    elif before is not None:
+        # Compatibilidade: cliente que só passou `before` ainda funciona.
         stmt = stmt.where(Message.created_at < before)
 
     rows = (await session.execute(stmt)).scalars().all()
     messages = list(reversed(rows))
-    next_before = messages[0].created_at if len(rows) == limit and messages else None
+    has_next = len(rows) == limit and bool(messages)
+    next_before = messages[0].created_at if has_next else None
+    next_before_id = messages[0].id if has_next else None
 
     return MessagePage(
         items=[MessageRead.model_validate(m) for m in messages],
         next_before=next_before,
+        next_before_id=next_before_id,
         limit=limit,
     )

@@ -67,10 +67,14 @@ class ConversationList(BaseModel):
 class MessagePage(BaseModel):
     """Página de mensagens em ordem cronológica (mais antigas primeiro).
 
-    `next_before`: timestamp ISO a passar como `before` para carregar a próxima
-    página de mensagens *mais antigas* (scroll-up). `null` se não há mais.
+    Para a próxima página (scroll-up de mensagens mais antigas), o cliente
+    passa o par `before=next_before` + `before_id=next_before_id` retornado.
+    O `id` desempata mensagens com `created_at` idêntico (race IN/OUT no
+    orchestrator pode produzir timestamps em microssegundos iguais).
+    Ambos `null` quando não há mais mensagens.
     """
 
     items: list[MessageRead]
     next_before: datetime | None
+    next_before_id: UUID | None
     limit: int

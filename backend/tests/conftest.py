@@ -15,9 +15,12 @@ from __future__ import annotations
 import os
 
 # Defaults de env ANTES de qualquer import do app (Settings é lru_cache).
+# Nota: app/db/session.py instancia um engine global com `database_url` no
+# import. Esse engine NÃO é usado nos testes — `client` fixture sobrescreve
+# `get_session` para apontar pro engine de testcontainers. O placeholder aqui
+# só evita que pydantic-settings exploda na ausência de .env.
 os.environ.setdefault("ADMIN_API_TOKEN", "test-admin-token")
 os.environ.setdefault("EVOLUTION_API_KEY", "test-evo-key")
-# Database real é injetado via fixture; este placeholder evita validação falhar.
 os.environ.setdefault(
     "DATABASE_URL", "postgresql+asyncpg://placeholder:placeholder@localhost/placeholder"
 )
@@ -79,18 +82,18 @@ async def engine(postgres_url: str) -> AsyncIterator[AsyncEngine]:
 
 @pytest_asyncio.fixture
 async def session(engine: AsyncEngine) -> AsyncIterator[AsyncSession]:
-    Maker = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
-    async with Maker() as s:
+    session_maker = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+    async with session_maker() as s:
         yield s
 
 
 @pytest_asyncio.fixture
 async def client(engine: AsyncEngine) -> AsyncIterator[AsyncClient]:
     """HTTP client com `get_session` override apontando para o engine de teste."""
-    Maker = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+    session_maker = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
     async def _override_get_session() -> AsyncIterator[AsyncSession]:
-        async with Maker() as s:
+        async with session_maker() as s:
             yield s
 
     fastapi_app.dependency_overrides[get_session] = _override_get_session

@@ -15,7 +15,11 @@ from app.models.enums import LeadStatus, ServiceInterest
 
 
 class LeadSummary(BaseModel):
-    """Subset usado quando o lead aparece embutido em outro recurso (ex: conversa)."""
+    """Subset usado quando o lead aparece embutido em outro recurso (ex: conversa).
+
+    Inclui `service_interest` porque a sidebar de conversas mostra esse hint
+    sem precisar de outro round-trip pro endpoint de detalhe.
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -23,6 +27,7 @@ class LeadSummary(BaseModel):
     whatsapp_jid: str
     name: str | None
     phone: str | None
+    service_interest: ServiceInterest
     status: LeadStatus
 
 

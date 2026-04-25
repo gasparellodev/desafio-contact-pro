@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 from httpx import AsyncClient
@@ -14,7 +14,7 @@ from app.models.lead import Lead
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 async def _seed_pair(
@@ -90,12 +90,8 @@ async def test_list_conversations_filters_by_lead_status(
 async def test_list_conversations_searches_by_name_phone_or_jid(
     client: AsyncClient, session: AsyncSession
 ):
-    await _seed_pair(
-        session, jid_suffix="0001", name="Maria Souza", phone="+5511911111111"
-    )
-    await _seed_pair(
-        session, jid_suffix="0002", name="João Silva", phone="+5511922222222"
-    )
+    await _seed_pair(session, jid_suffix="0001", name="Maria Souza", phone="+5511911111111")
+    await _seed_pair(session, jid_suffix="0002", name="João Silva", phone="+5511922222222")
 
     by_name = await client.get("/api/conversations", params={"q": "maria"})
     assert by_name.status_code == 200
@@ -130,9 +126,7 @@ async def test_list_conversations_paginates_via_limit_and_offset(
 async def test_get_conversation_detail_returns_lead_summary(
     client: AsyncClient, session: AsyncSession
 ):
-    _, conv = await _seed_pair(
-        session, name="Detalhe", last_intent=Intent.PRICING
-    )
+    _, conv = await _seed_pair(session, name="Detalhe", last_intent=Intent.PRICING)
 
     response = await client.get(f"/api/conversations/{conv.id}")
 
@@ -151,3 +145,53 @@ async def test_get_conversation_returns_404_when_missing(client: AsyncClient):
 async def test_list_conversations_requires_admin_token(client: AsyncClient):
     response = await client.get("/api/conversations", headers={"X-Admin-Token": ""})
     assert response.status_code == 401
+
+
+async def test_list_conversations_rejects_invalid_admin_token(client: AsyncClient):
+    """Confirma que `compare_digest` realmente compara — não basta header presente."""
+    response = await client.get(
+        "/api/conversations", headers={"X-Admin-Token": "this-is-not-the-token"}
+    )
+    assert response.status_code == 401
+
+
+async def test_list_conversations_combines_status_and_q_filters(
+    client: AsyncClient, session: AsyncSession
+):
+    await _seed_pair(session, jid_suffix="0001", name="Maria Souza", status=LeadStatus.NEW)
+    await _seed_pair(session, jid_suffix="0002", name="Maria Lima", status=LeadStatus.QUALIFIED)
+    await _seed_pair(session, jid_suffix="0003", name="João Souza", status=LeadStatus.QUALIFIED)
+
+    response = await client.get("/api/conversations", params={"status": "qualified", "q": "souza"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 1
+    assert body["items"][0]["lead"]["name"] == "João Souza"
+
+
+async def test_list_conversations_offset_beyond_total_returns_empty(
+    client: AsyncClient, session: AsyncSession
+):
+    await _seed_pair(session, jid_suffix="0001", name="Único")
+
+    response = await client.get("/api/conversations", params={"offset": 100})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["items"] == []
+    assert body["total"] == 1
+
+
+async def test_list_conversations_q_does_not_treat_percent_as_wildcard(
+    client: AsyncClient, session: AsyncSession
+):
+    """`q="%"` deve buscar literal e não casar com tudo (escape de wildcard)."""
+    await _seed_pair(session, jid_suffix="0001", name="Sem porcento")
+    await _seed_pair(session, jid_suffix="0002", name="100% Garantia")
+
+    response = await client.get("/api/conversations", params={"q": "%"})
+
+    assert response.status_code == 200
+    items = response.json()["items"]
+    assert {i["lead"]["name"] for i in items} == {"100% Garantia"}
