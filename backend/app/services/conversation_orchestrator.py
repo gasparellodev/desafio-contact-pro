@@ -42,6 +42,7 @@ from app.services.ai.factory import get_ai_provider
 from app.services.ai.prompts import build_system_prompt
 from app.services.transcription.openai_stt import OpenAITranscriber, get_transcriber
 from app.services.tts.openai_tts import OpenAITTS, get_tts
+from app.services.vision.multimodal import describe_image as describe_image_async
 from app.services.whatsapp.evolution_client import (
     EvolutionAPIError,
     EvolutionClient,
@@ -215,9 +216,28 @@ class ConversationOrchestrator:
         except EvolutionAPIError as exc:
             logger.warning("reaction_failed", extra={"error": str(exc)})
 
-        # 5. áudio → STT (Whisper); imagem → vision (PR #14)
+        # 5. áudio → STT; imagem → vision (multimodal)
         ai_input_text = parsed.text or ""
-        if parsed.message_type == MessageType.AUDIO:
+        if parsed.message_type == MessageType.IMAGE:
+            description = await self._describe_image(parsed)
+            if description:
+                msg_in.transcription = description
+                self.session.add(msg_in)
+                await self.session.commit()
+                await self.session.refresh(msg_in)
+                await emit_to_conversation(
+                    str(conv.id),
+                    "audio.transcribed",
+                    {"messageId": str(msg_in.id), "transcription": description},
+                )
+                caption = parsed.text or ""
+                ai_input_text = (
+                    f"[Lead enviou imagem. Descrição: {description}]"
+                    + (f"\nLegenda: {caption}" if caption else "")
+                )
+            else:
+                ai_input_text = "[imagem recebida — descrição indisponível]"
+        elif parsed.message_type == MessageType.AUDIO:
             transcription = await self._transcribe_audio(parsed)
             if transcription:
                 msg_in.transcription = transcription
@@ -362,6 +382,39 @@ class ConversationOrchestrator:
         await self._send_smart_reaction(parsed, self._reaction_for_status(lead.status))
 
     # ----- helpers -----
+
+    async def _describe_image(self, parsed: ParsedMessage) -> str:
+        import base64
+
+        b64 = parsed.media_base64
+        mime = parsed.media_mime or "image/jpeg"
+        if not b64:
+            try:
+                media = await self.whatsapp.download_media_base64(
+                    {
+                        "id": parsed.whatsapp_message_id,
+                        "remoteJid": parsed.remote_jid,
+                        "fromMe": False,
+                    }
+                )
+            except EvolutionAPIError as exc:
+                logger.warning("image_download_failed", extra={"error": str(exc)})
+                return ""
+            b64 = media.get("base64")
+            mime = media.get("mimetype") or mime
+        if not b64:
+            return ""
+        try:
+            image_bytes = base64.b64decode(b64)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("image_decode_failed", extra={"error": str(exc)})
+            return ""
+        return await describe_image_async(
+            image_bytes=image_bytes,
+            mime_type=mime,
+            hint=parsed.text or "",
+            provider=self.ai,
+        )
 
     async def _send_audio_reply(self, *, parsed: ParsedMessage, reply_text: str) -> dict:
         """Gera TTS e envia como PTT via Evolution. Retorna a resposta crua do Evolution."""
