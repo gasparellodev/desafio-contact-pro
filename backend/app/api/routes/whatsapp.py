@@ -69,9 +69,12 @@ async def setup_webhook() -> dict:
     settings = get_settings()
     client = get_evolution_client()
     try:
+        # Repassa `apikey` como header customizado nos webhooks do Evolution para
+        # nosso backend conseguir validar a origem (issue #31 deixou apikey obrigatório).
         return await client.set_webhook(
             url=settings.evolution_webhook_url,
             base64=True,
+            headers={"apikey": settings.evolution_api_key},
         )
     except EvolutionAPIError as exc:
         # Não vaza str(exc) (URLs internas / hints SQL); detalhe completo vai para o log.

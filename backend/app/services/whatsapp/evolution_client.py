@@ -118,6 +118,7 @@ class EvolutionClient:
         url: str,
         events: list[str] | None = None,
         base64: bool = True,
+        headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         events = events or [
             "MESSAGES_UPSERT",
@@ -125,18 +126,21 @@ class EvolutionClient:
             "QRCODE_UPDATED",
             "SEND_MESSAGE",
         ]
+        webhook_body: dict[str, Any] = {
+            "enabled": True,
+            "url": url,
+            "byEvents": False,
+            "base64": base64,
+            "events": events,
+        }
+        # Evolution v2 não envia `apikey` automaticamente nas chamadas de webhook;
+        # passamos via `headers` para o nosso backend conseguir validar a origem.
+        if headers:
+            webhook_body["headers"] = headers
         return await self._request(
             "POST",
             f"/webhook/set/{self.instance}",
-            json={
-                "webhook": {
-                    "enabled": True,
-                    "url": url,
-                    "byEvents": False,
-                    "base64": base64,
-                    "events": events,
-                }
-            },
+            json={"webhook": webhook_body},
         )
 
     # ===== Send =====
