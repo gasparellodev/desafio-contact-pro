@@ -34,18 +34,19 @@ class OpenAITTS:
         if instructions and self.model.startswith("gpt-4o-mini-tts"):
             kwargs["instructions"] = instructions
         try:
-            resp = await self.client.audio.speech.create(**kwargs)
+            # `with_streaming_response` é o caminho correto para obter bytes em SDKs >=1.50;
+            # `create` direto retorna `LegacyAPIResponse` cujo `.content` já é bytes (sync),
+            # mas para evitar a deprecação de `LegacyAPIResponse.read()` usamos streaming.
+            async with self.client.audio.speech.with_streaming_response.create(
+                **kwargs
+            ) as resp:
+                chunks = []
+                async for chunk in resp.iter_bytes():
+                    chunks.append(chunk)
+                return b"".join(chunks)
         except Exception as exc:  # noqa: BLE001
             logger.exception("tts_failed", extra={"model": self.model, "error": str(exc)})
             raise
-
-        # SDK retorna `HttpxBinaryResponseContent` — usar .read() / .iter_bytes()
-        if hasattr(resp, "read"):
-            return await resp.read() if hasattr(resp.read, "__call__") and hasattr(resp, "aiter_bytes") else resp.read()
-        if hasattr(resp, "content"):
-            return resp.content
-        # Fallback: serializa
-        return bytes(resp)
 
 
 _singleton: OpenAITTS | None = None

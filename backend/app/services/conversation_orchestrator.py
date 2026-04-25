@@ -380,9 +380,36 @@ class ConversationOrchestrator:
                 except EvolutionAPIError as exc2:
                     msg_out.error_reason = (msg_out.error_reason or "") + f" | fallback falhou: {exc2}"
         except Exception as exc:  # noqa: BLE001
-            logger.exception("send_unexpected", extra={"error": str(exc)})
+            logger.exception(
+                "send_unexpected",
+                extra={"error_class": exc.__class__.__name__, "type": out_type.value},
+            )
             msg_out.status = MessageStatus.FAILED
-            msg_out.error_reason = str(exc)
+            msg_out.error_reason = f"{exc.__class__.__name__}: {exc}"
+            # Fallback texto cobre QUALQUER falha em áudio (TTS quebrou, mime errado, etc).
+            if out_type == MessageType.AUDIO:
+                try:
+                    await self.whatsapp.send_text(
+                        number=jid_to_phone(parsed.remote_jid),
+                        text=ai_resp.reply,
+                        quoted={
+                            "key": {
+                                "remoteJid": parsed.remote_jid,
+                                "fromMe": False,
+                                "id": parsed.whatsapp_message_id,
+                            },
+                            "message": {"conversation": parsed.text or ""},
+                        },
+                    )
+                    msg_out.status = MessageStatus.SENT
+                    msg_out.type = MessageType.TEXT  # converte para texto na persistência
+                    msg_out.error_reason = (
+                        (msg_out.error_reason or "") + " | fallback texto enviado"
+                    )
+                except Exception as exc2:  # noqa: BLE001
+                    msg_out.error_reason = (msg_out.error_reason or "") + (
+                        f" | fallback falhou: {exc2.__class__.__name__}"
+                    )
         finally:
             self.session.add(msg_out)
             await self.session.commit()
