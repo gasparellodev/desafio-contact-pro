@@ -1,73 +1,73 @@
-# React + TypeScript + Vite
+# Frontend — Contact Pro Inbox
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Inbox web em tempo real para acompanhar conversas do chatbot WhatsApp + IA. **Responsivo mobile-first**, com **rotas deep-linkáveis** (F5 mantém a conversa aberta), suíte Vitest co-located e a11y validada com axe-core.
 
-Currently, two official plugins are available:
+> Para visão geral do projeto, comandos Docker e setup completo, leia o [`README.md` da raiz](../README.md).
+> Para convenções (componentes, hooks, providers, testes), leia [`CLAUDE.md`](./CLAUDE.md), [`src/components/CLAUDE.md`](./src/components/CLAUDE.md), [`src/hooks/CLAUDE.md`](./src/hooks/CLAUDE.md).
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Stack
 
-## React Compiler
+- **Vite 8** + **React 19.2** + **TypeScript 6** strict.
+- **Tailwind v4** via plugin oficial `@tailwindcss/vite` (sem `postcss.config.js`); tokens em **OKLCH** no `src/index.css`.
+- **shadcn/ui** style `new-york`, primitives copiadas em `src/components/ui/`.
+- **React Router 7** (`createBrowserRouter`, lazy routes).
+- **TanStack Query 5** (`useQuery`, cache merge via `setQueryData` quando chega evento Socket.IO).
+- **socket.io-client 4.8.x** (singleton em `src/lib/socket.ts`, `autoConnect: false`).
+- **Vitest 4** + **Testing Library 16** + **jsdom 29** + **axe-core 4**.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Scripts
 
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm install
+npm run dev            # http://localhost:5173 (host: true)
+npm run build          # tsc -b && vite build (initial gzip ~125KB)
+npm run preview        # serve dist em :5173
+npm run lint           # eslint, zero erros esperados
+npm run typecheck      # tsc -b --noEmit (separado do build)
+npm run test           # vitest run (49 testes em ~4s)
+npm run test:watch     # vitest interativo
+npm run test:ui        # @vitest/ui no browser
+npm run test:coverage  # 85% statements / 67% branches / 87% functions / 91% lines
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Como rodar localmente sem Docker
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+Útil para iterar rápido em UI:
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+# Backend precisa estar rodando em http://localhost:8000.
+# Se não tiver, sobe só backend+db+redis+evolution:
+docker compose up -d backend
+
+# Em outro terminal:
+cd frontend
+npm install
+npm run dev
+# Browser http://localhost:5173
 ```
+
+`VITE_API_URL` (default `http://localhost:8000`) e `VITE_ADMIN_TOKEN` (mesmo valor de `ADMIN_API_TOKEN` do backend) podem ser sobrescritos via `.env.local` se precisar.
+
+## Arquitetura local
+
+```
+src/
+  main.tsx                # ErrorBoundary > QueryProvider > SocketProvider > RouterProvider
+  routes/                 # createBrowserRouter + React.lazy code splitting
+  providers/              # QueryProvider, SocketProvider (escreve no cache TanStack ao receber evento)
+  hooks/                  # useConversationsQuery, useConversationMessages, useLead, useWhatsAppConnection
+  components/             # ConversationList, MessageList, MessageBubble, LeadPanel, LeadSheet, QRCodePanel, ErrorBoundary, Skeletons
+  lib/                    # api.ts (typed fetchers), queryKeys.ts, query-client.ts, socket.ts
+  types/                  # contratos Socket.IO + schemas REST
+  test/                   # setup.ts (jest-dom + cleanup), test-utils.tsx (renderWithProviders + runAxe)
+```
+
+## Convenção de testes
+
+- **Co-located**: `Component.test.tsx` ao lado de `Component.tsx`.
+- **Mock de fetch**: `vi.stubGlobal('fetch', vi.fn(...))` no `beforeEach` + `vi.unstubAllGlobals` no `afterEach`.
+- **Mock do socket**: `vi.hoisted(() => ({ fakeSocket }))` antes de `vi.mock('@/lib/socket', () => ({ socket: fakeSocket }))`.
+- **A11y**: `await runAxe(container)` + `expect(result.violations).toEqual([])` em componentes críticos.
+- **Coverage thresholds** em `vitest.config.ts`: 80% statements / 60% branches / 80% functions / 80% lines (rotas excluídas — E2E Spec C cuida).
+
+Mais detalhes em [`CLAUDE.md`](./CLAUDE.md).
