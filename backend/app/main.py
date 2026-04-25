@@ -4,7 +4,7 @@ import socketio
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import health
+from app.api.routes import health, webhooks, whatsapp
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.core.socketio import sio
@@ -34,6 +34,8 @@ fastapi_app.add_middleware(
 )
 
 fastapi_app.include_router(health.router)
+fastapi_app.include_router(webhooks.router)
+fastapi_app.include_router(whatsapp.router)
 
 
 # Socket.IO ASGI root: NÃO usar fastapi_app.mount(); o pattern correto é envelopar.
