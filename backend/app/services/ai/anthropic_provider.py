@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any
 
@@ -13,62 +12,56 @@ from app.services.ai.base import AIResponse, ChatTurn
 
 logger = logging.getLogger(__name__)
 
-# Schema do tool — mesmo shape do AIResponse Pydantic.
-EMIT_TOOL_SCHEMA: dict[str, Any] = {
-    "name": "emit_response",
-    "description": (
-        "Emite a resposta estruturada do assistente comercial."
-        " Sempre que receber input do usuário, chame esta tool com a estrutura completa."
-    ),
-    "input_schema": {
-        "type": "object",
-        "additionalProperties": False,
-        "required": ["reply", "intent", "lead_extracted"],
-        "properties": {
-            "reply": {"type": "string"},
-            "intent": {
-                "type": "string",
-                "enum": [
-                    "contact_z",
-                    "contact_tel",
-                    "mailing",
-                    "data_enrichment",
-                    "pricing",
-                    "human_handoff",
-                    "opt_out",
-                    "support",
-                    "general_question",
-                ],
-            },
-            "lead_extracted": {
-                "type": "object",
-                "additionalProperties": False,
-                "properties": {
-                    "name": {"type": ["string", "null"]},
-                    "company": {"type": ["string", "null"]},
-                    "phone": {"type": ["string", "null"]},
-                    "service_interest": {
-                        "type": ["string", "null"],
-                        "enum": [
-                            "contact_z",
-                            "contact_tel",
-                            "mailing",
-                            "data_enrichment",
-                            "unknown",
-                            None,
-                        ],
-                    },
-                    "lead_goal": {"type": ["string", "null"]},
-                    "estimated_volume": {"type": ["string", "null"]},
-                },
-            },
-            "status_suggestion": {
-                "type": ["string", "null"],
-                "enum": ["new", "qualified", "needs_human", "opt_out", None],
-            },
-        },
-    },
-}
+
+def _resolve_refs(schema: dict[str, Any], defs: dict[str, Any]) -> dict[str, Any]:
+    """Inline `$ref` referenciando `$defs` para o formato esperado pela Anthropic.
+
+    A Anthropic Tools API aceita JSON Schema mas não resolve `$defs` automaticamente.
+    Esta função substitui `{"$ref": "#/$defs/X"}` pelo schema concreto, recursivamente.
+    """
+    if not isinstance(schema, dict):
+        return schema
+    if "$ref" in schema:
+        ref = schema["$ref"]
+        if ref.startswith("#/$defs/"):
+            name = ref.split("/", 2)[-1]
+            target = defs.get(name, {})
+            return _resolve_refs(target, defs)
+        return schema
+    out: dict[str, Any] = {}
+    for k, v in schema.items():
+        if k == "$defs":
+            continue
+        if isinstance(v, dict):
+            out[k] = _resolve_refs(v, defs)
+        elif isinstance(v, list):
+            out[k] = [_resolve_refs(item, defs) if isinstance(item, dict) else item for item in v]
+        else:
+            out[k] = v
+    return out
+
+
+def _build_emit_tool_schema() -> dict[str, Any]:
+    """Deriva o `input_schema` do tool emit_response a partir de `AIResponse`.
+
+    Issue #35: evita drift entre o JSON Schema do tool e o Pydantic. Qualquer
+    campo novo no `AIResponse` reflete automaticamente no contrato Anthropic.
+    """
+    schema = AIResponse.model_json_schema()
+    defs = schema.get("$defs", {})
+    inlined = _resolve_refs(schema, defs)
+    inlined["additionalProperties"] = False
+    return {
+        "name": "emit_response",
+        "description": (
+            "Emite a resposta estruturada do assistente comercial."
+            " Sempre que receber input do usuário, chame esta tool com a estrutura completa."
+        ),
+        "input_schema": inlined,
+    }
+
+
+EMIT_TOOL_SCHEMA: dict[str, Any] = _build_emit_tool_schema()
 
 
 class AnthropicProvider:
@@ -160,12 +153,3 @@ class AnthropicProvider:
             if text:
                 parts.append(text)
         return "\n".join(parts).strip()
-
-
-# Helper para ler dict tipados (caso anthropic SDK retorne via .dict())
-def _to_dict(obj: Any) -> dict[str, Any]:
-    if isinstance(obj, dict):
-        return obj
-    if hasattr(obj, "model_dump"):
-        return obj.model_dump()
-    return json.loads(json.dumps(obj, default=str))
