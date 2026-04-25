@@ -87,3 +87,31 @@ Formato:
 **Tempo gasto:** ~25 min
 
 **Smoke test:** `uv run python -c "from app.main import app, fastapi_app"` → OK. Rotas `/health`, `/docs`, `/redoc`, `/openapi.json` registradas.
+
+---
+
+## 2026-04-25 11:05 — PR #3: Frontend scaffold
+
+**Decisões:**
+- Vite 8 + React 19.2 + TypeScript 6 (strict) + Tailwind v4 via plugin oficial `@tailwindcss/vite` (sem `postcss.config.js`).
+- shadcn/ui no estilo `new-york`, base color `neutral`, tokens em **OKLCH** (defaults v4) — escritos diretamente em `src/index.css` via `@theme inline`.
+- 6 primitives copiados manualmente (button, card, badge, scroll-area, separator, avatar) ao invés de rodar `npx shadcn@latest init` interativo — mais rápido e determinístico para 6h.
+- Path alias `@/*` configurado em `vite.config.ts` (resolve.alias) **e** em `tsconfig.app.json` (sem `baseUrl` — deprecated em TS 6, usar só `paths` com `moduleResolution: "bundler"`).
+- `vite.config.ts` com `server.host: true`, `server.port: 5173`, `server.watch.usePolling: true` (necessário para HMR via bind-mount em macOS).
+- `App.tsx` placeholder com layout split (3 cards: Conversas | Mensagens | Lead) usando shadcn `Card` + `Badge`.
+- Dockerfile multi-stage (deps → builder → runner com `vite preview`).
+
+**Dificuldades:**
+- TypeScript 6 falhou no primeiro build com `TS5101: 'baseUrl' is deprecated`. Solução: remover `baseUrl`, manter só `paths` (resolução em modo bundler funciona).
+- shadcn CLI é interativo e exigiria responder prompts; optei por copiar componentes manualmente (decisão consciente para preservar tempo).
+
+**Trade-offs:**
+- Sem react-query / zustand neste momento — estado vai ficar em hooks customizados com `useReducer` quando o PR #10 chegar (escopo enxuto).
+- `npm run build` valida tudo (tsc strict + Vite); como teste é simples, não vale Vitest neste PR.
+
+**Sugestões da IA rejeitadas/alteradas:**
+- IA sugeriu manter `baseUrl: "."` com `ignoreDeprecations: "6.0"` para silenciar; alterado para remover `baseUrl` por completo (mais limpo, sem flag de desuso).
+
+**Tempo gasto:** ~25 min
+
+**Smoke test:** `npm run build` → tsc strict OK, Vite build OK (22 KB CSS, 223 KB JS gzip 70 KB).
