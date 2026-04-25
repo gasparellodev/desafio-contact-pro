@@ -9,6 +9,8 @@ from fastapi import APIRouter, Header, HTTPException, Request, status
 
 from app.core.config import get_settings
 from app.core.socketio import emit_global
+from app.db.session import SessionLocal
+from app.services.conversation_orchestrator import ConversationOrchestrator
 from app.services.whatsapp.payload import normalize_event, parse_messages_upsert
 
 logger = logging.getLogger(__name__)
@@ -20,18 +22,15 @@ async def evolution_webhook(
     request: Request,
     x_apikey: str | None = Header(default=None, alias="apikey"),
 ) -> dict[str, Any]:
-    """Recebe eventos do Evolution. Valida apikey quando o webhook foi
-    configurado para enviá-la (header opcional na config v2).
+    """Recebe eventos do Evolution. Valida apikey quando presente.
 
-    Eventos tratados nesta entrega:
-    - messages.upsert  → registra mensagem; orchestrator (PR #9) processa
-    - connection.update → emite estado para o frontend
-    - qrcode.updated   → emite QR para o frontend
+    Eventos tratados:
+    - messages.upsert  → ConversationOrchestrator (texto/áudio/imagem)
+    - connection.update → emite estado WhatsApp
+    - qrcode.updated   → emite QR Code para UI
     """
     settings = get_settings()
 
-    # Validação leve — Evolution v2 não envia apikey por padrão no webhook,
-    # então só validamos quando vier preenchido pelo client.
     if x_apikey and settings.evolution_api_key and x_apikey != settings.evolution_api_key:
         raise HTTPException(status_code=401, detail="invalid apikey")
 
@@ -47,20 +46,23 @@ async def evolution_webhook(
         parsed = parse_messages_upsert(payload)
         if parsed is None:
             return {"status": "ignored", "reason": "unsupported_message_type"}
-        # Orchestrator será conectado no PR #9. Por ora, apenas emite snapshot.
-        await emit_global(
-            "wa.message.received.raw",
-            {
-                "id": parsed.whatsapp_message_id,
-                "remote_jid": parsed.remote_jid,
-                "from_me": parsed.from_me,
-                "type": parsed.message_type.value,
-                "text": parsed.text,
-                "has_media": bool(parsed.media_base64),
-                "media_mime": parsed.media_mime,
-            },
-        )
-        return {"status": "received", "id": parsed.whatsapp_message_id}
+        if parsed.from_me:
+            return {"status": "ignored", "reason": "self_message"}
+
+        # ConversationOrchestrator administra a sessão internamente.
+        async with SessionLocal() as session:
+            orchestrator = ConversationOrchestrator(session)
+            try:
+                await orchestrator.handle_incoming(parsed)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("orchestrator_failed", extra={"error": str(exc)})
+                await emit_global(
+                    "error",
+                    {"code": "orchestrator_failed", "message": str(exc)},
+                )
+                # Devolver 200 para Evolution não fazer redelivery infinita.
+                return {"status": "error", "detail": str(exc)[:200]}
+        return {"status": "processed", "id": parsed.whatsapp_message_id}
 
     if event in {"connection.update"}:
         data = payload.get("data") or {}
@@ -72,10 +74,8 @@ async def evolution_webhook(
 
     if event in {"qrcode.updated"}:
         data = payload.get("data") or {}
-        await emit_global(
-            "wa.qrcode.updated",
-            {"qrcode": data.get("qrcode") or data.get("base64")},
-        )
+        qr = data.get("qrcode") or data.get("base64")
+        await emit_global("wa.qrcode.updated", {"qrcode": qr})
         return {"status": "ok"}
 
     return {"status": "ignored", "event": event}

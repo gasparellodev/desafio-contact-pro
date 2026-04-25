@@ -252,3 +252,30 @@ Formato:
 **Smoke test:** `from app.services.ai.factory import get_ai_provider` + `build_system_prompt()` retorna 4307 chars; AIResponse fields batem.
 
 **Pendente:** smoke test real com chave (próxima fase no compose-up).
+
+---
+
+## 2026-04-25 12:55 — PR #9: ConversationOrchestrator (texto)
+
+**Decisões:**
+- `services/conversation_orchestrator.py` em arquivo único (~250 linhas) — para 6h, ter o pipeline na frente é melhor que distribuir em N repositórios.
+- Pipeline texto-only neste PR (áudio/imagem entram nos PRs #11–14 estendendo o método).
+- Cap de histórico em **12 mensagens** (`HISTORY_LIMIT`) — controla custo da chamada e latência.
+- Reaction 👍 fire-and-forget (não bloqueia se falhar).
+- Smart reaction final ≠ 👍: ✅ qualified, 👌 opt_out, 🤝 needs_human (decisão própria — desafio não exige mas adiciona contexto visual no celular).
+- Webhook handler (`api/routes/webhooks.py`) instancia `SessionLocal()` per-request e passa para o orchestrator. Sempre devolve 200 (mesmo em erro do AI/send) para Evolution não fazer redelivery infinita; o erro é emitido via `error` no Socket.IO.
+
+**Dificuldades:**
+- Decidir o que fazer com `from_me=True`: ignorar (nossa escolha) vs. usar como ack do envio. Optei por ignorar — o ciclo OUT já tem feedback explícito via persistência + `wa.message.sent` antes mesmo do webhook chegar.
+- Anti-loop: o `quoted` no `send_text` precisa do payload original com `key.fromMe=false` (do remetente original). Documentado.
+
+**Trade-offs:**
+- Sem fila assíncrona — o webhook handler bloqueia até toda a pipeline terminar. Para WhatsApp single-instance e prazo de 6h, é aceitável (latência ~3-5s típica). Documentar como limitação no README.
+- `_apply_extracted_to_lead` só preenche campos vazios (não sobrescreve). Trade-off: lead que muda de nome/empresa em conversas posteriores não atualiza. Bom o suficiente para a entrega.
+
+**Sugestões da IA rejeitadas/alteradas:**
+- IA inicial sugeriu emitir todos os 12 eventos do Socket.IO em uma única função `emit_pipeline()`. Rejeitei: cada emit espelha um momento real do pipeline; agrupar quebraria observabilidade.
+
+**Tempo gasto:** ~30 min
+
+**Smoke test:** `from app.services.conversation_orchestrator import ConversationOrchestrator` OK, todas as rotas registradas, sem erros de importação.
