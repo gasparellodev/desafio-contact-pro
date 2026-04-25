@@ -16,11 +16,25 @@ interface Props {
   onSelect(id: string): void
 }
 
-const statusVariant: Record<Lead['status'], 'default' | 'success' | 'warning' | 'secondary'> = {
+const statusBadgeVariant: Record<Lead['status'], 'default' | 'success' | 'warning' | 'secondary'> = {
   new: 'secondary',
   qualified: 'success',
   needs_human: 'warning',
   opt_out: 'secondary',
+}
+
+const statusDotClass: Record<Lead['status'], string> = {
+  new: 'bg-status-new',
+  qualified: 'bg-status-qualified',
+  needs_human: 'bg-status-needs-human',
+  opt_out: 'bg-status-opt-out',
+}
+
+const statusLabel: Record<Lead['status'], string> = {
+  new: 'Novo',
+  qualified: 'Qualificado',
+  needs_human: 'Precisa humano',
+  opt_out: 'Opt-out',
 }
 
 function relativeTime(iso: string): string {
@@ -53,45 +67,60 @@ export function ConversationList({ items, activeId, onSelect }: Props) {
   }
   return (
     <ScrollArea className="h-full">
-      <div className="flex flex-col">
+      <ul className="flex flex-col" role="list">
         {items.map(({ conversation, lead }, idx) => (
-          <div key={conversation.id}>
+          <li key={conversation.id}>
             <button
               type="button"
               onClick={() => onSelect(conversation.id)}
+              aria-current={activeId === conversation.id ? 'true' : undefined}
               className={cn(
-                'hover:bg-accent flex w-full items-center gap-3 px-4 py-3 text-left transition-colors',
-                activeId === conversation.id && 'bg-accent',
+                'hover:bg-accent focus-visible:bg-accent focus-visible:outline-ring/50 flex w-full items-center gap-3 px-4 py-3 text-left transition-colors focus-visible:outline-2',
+                activeId === conversation.id && 'bg-accent'
               )}
             >
-              <Avatar>
-                <AvatarFallback>{initials(lead.name, lead.whatsapp_jid)}</AvatarFallback>
-              </Avatar>
+              <div className="relative">
+                <Avatar>
+                  <AvatarFallback className="font-mono text-xs">
+                    {initials(lead.name, lead.whatsapp_jid)}
+                  </AvatarFallback>
+                </Avatar>
+                <span
+                  className={cn(
+                    'border-card absolute -right-0.5 -bottom-0.5 size-2.5 rounded-full border-2',
+                    statusDotClass[lead.status]
+                  )}
+                  aria-label={`Status do lead: ${statusLabel[lead.status]}`}
+                />
+              </div>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center justify-between gap-2">
                   <span className="truncate font-medium">
                     {lead.name || lead.whatsapp_jid.replace(/@.*/, '') || 'Lead'}
                   </span>
-                  <span className="text-muted-foreground text-xs">
+                  <span className="text-muted-foreground font-mono text-xs">
                     {relativeTime(conversation.last_message_at)}
                   </span>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
                   {conversation.last_intent && (
-                    <Badge variant="outline" className="text-[10px]">
+                    <Badge
+                      variant="outline"
+                      className="font-mono text-[10px] uppercase tracking-wider"
+                    >
                       {conversation.last_intent.replaceAll('_', ' ')}
                     </Badge>
                   )}
-                  <Badge variant={statusVariant[lead.status]} className="text-[10px]">
-                    {lead.status.replaceAll('_', ' ')}
+                  <Badge variant={statusBadgeVariant[lead.status]} className="text-[10px]">
+                    {statusLabel[lead.status]}
                   </Badge>
                 </div>
               </div>
             </button>
             {idx < items.length - 1 && <Separator />}
-          </div>
+          </li>
         ))}
-      </div>
+      </ul>
     </ScrollArea>
   )
 }

@@ -26,7 +26,7 @@ export function LeadPanel({ lead }: Props) {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Lead</CardTitle>
+          <CardTitle className="font-mono text-sm uppercase tracking-wide">Lead</CardTitle>
         </CardHeader>
         <CardContent className="text-muted-foreground text-sm">
           Selecione uma conversa para ver os dados extraídos.
@@ -41,7 +41,7 @@ export function LeadPanel({ lead }: Props) {
           <CardTitle>{lead.name ?? 'Lead sem nome'}</CardTitle>
           <Badge variant={statusVariant[lead.status]}>{statusLabel[lead.status]}</Badge>
         </div>
-        <p className="text-muted-foreground text-xs">{lead.whatsapp_jid}</p>
+        <p className="text-muted-foreground font-mono text-xs">{lead.whatsapp_jid}</p>
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
         <Field label="Empresa" value={lead.company} />
@@ -49,7 +49,11 @@ export function LeadPanel({ lead }: Props) {
         <Separator />
         <Field
           label="Interesse"
-          value={lead.service_interest === 'unknown' ? null : lead.service_interest?.replaceAll('_', ' ')}
+          value={
+            lead.service_interest === 'unknown'
+              ? null
+              : lead.service_interest?.replaceAll('_', ' ')
+          }
         />
         <Field label="Objetivo" value={lead.lead_goal} />
         <Field label="Volume estimado" value={lead.estimated_volume} />
@@ -61,10 +65,10 @@ export function LeadPanel({ lead }: Props) {
 function Field({ label, value }: { label: string; value: string | null | undefined }) {
   return (
     <div>
-      <div className="text-muted-foreground text-xs uppercase tracking-wide">{label}</div>
-      <div className={value ? 'font-medium' : 'text-muted-foreground italic'}>
-        {value ?? '—'}
+      <div className="text-muted-foreground font-mono text-xs uppercase tracking-wider">
+        {label}
       </div>
+      <div className={value ? 'font-medium' : 'text-muted-foreground italic'}>{value ?? '—'}</div>
     </div>
   )
 }

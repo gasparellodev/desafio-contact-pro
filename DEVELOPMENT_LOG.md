@@ -485,6 +485,66 @@ npm run test             # 3/3 passed em ~1s
 
 ---
 
+## 2026-04-25 17:30 — PR #52 / Issue #51: Responsividade mobile-first + bug fixes + redesign sutil (Spec A — Phase 3)
+
+**Contexto:** terceira PR do Spec A. Resolve as 2 dores explícitas restantes: responsividade e bugs de componente. Aplica direção estética definida pela skill `frontend-design` (operations control room: denso, calmo, técnico, mono pra hints técnicos, paleta restrita com acentos por status, motion sutil).
+
+**Decisões:**
+- **Sheet shadcn** primitive copiado pra `components/ui/sheet.tsx`. Em mobile/tablet, lead + QR viram um Sheet aberto via botão "Detalhes" no header da conversa. Desktop mantém coluna direita 320px fixa.
+- **Layout responsivo** via Tailwind breakpoints:
+  - `< md` (mobile): rota `/conversations` mostra só lista (full width). Rota `/conversations/:id` mostra só chat com botão de voltar (`<` ChevronLeft) + LeadSheet.
+  - `md` (tablet ≥768px): 2 colunas (lista 280px + chat fluido). Lead via Sheet.
+  - `lg` (desktop ≥1024px): 3 colunas (lista 320px + chat fluido + lead/QR 320px direto na sidebar).
+- **`LeadSheet`** wrapper que enclausura LeadPanel + QRCodePanel num Sheet shadcn (Radix Dialog por baixo) — animações grátis, foco gerenciado.
+- **Identidade visual** sem instalar fontes externas (mantém system stack + Tailwind `font-mono` p/ IDs/timestamps/badges/headers técnicos):
+  - Tokens de status em `:root` e `.dark` (OKLCH): `--status-new` (slate), `--status-qualified` (emerald), `--status-needs-human` (amber), `--status-opt-out` (muted rose). Expostos como `bg-status-*` via `@theme inline`.
+  - Status dot de 10px na avatar do lead na lista (visual instantâneo do estado).
+  - Header sticky 56px com sistema-pulse animado (dot emerald pulsando lento) quando socket conectado, dot esmaecido quando off.
+  - Animações em `index.css` com cubic-bezier — `animate-message-enter` (fade + lift 4px + scale 0.985→1 em 180ms) e `animate-status-pulse` (2.5s ease infinite).
+- **Bug fixes**:
+  - `QRCodePanel`: `useRef<AbortController>` cancela todos os 3 fetches em voo no unmount. Removi `useEffect(() => setPulledQr(null), [qrcode])` (era redundante — `display = qrcode ?? pulledQr` já cobre o caso e o efeito atrava o lint `react-hooks/set-state-in-effect`). QR agora é responsivo: `aspect-square w-full max-w-xs` em vez de `h-48 w-48` fixo. Adicionado `loading="lazy"` na imagem.
+  - `MessageList`: troca `endRef.scrollIntoView()` por seleção do viewport da Radix ScrollArea via `[data-slot="scroll-area-viewport"]` + `scrollTop = scrollHeight` dentro de `requestAnimationFrame`. Funciona em mobile real (jsdom só valida o caminho).
+  - `MessageList` ganha `role="log"` + `aria-live="polite"` no ScrollArea — anuncia novas mensagens em leitores de tela.
+- **Acessibilidade incremental** (Phase 4 fará auditoria axe completa):
+  - `aria-current="true"` no item de lista ativo.
+  - `aria-label` em botões só com ícone (voltar, Sheet trigger, close).
+  - `role="list"` + `<li>` na lista de conversas.
+  - Foco gerenciado pelo Radix Dialog/Sheet automaticamente.
+- **eslint.config.js** ganha override que desliga `react-refresh/only-export-components` em `src/components/ui/**` (primitives shadcn vendored exportam variants junto, padrão do projeto). Combinado com o override de `**/*.test.*` que já existia, **lint agora roda sem erros**.
+- **10 testes novos** (total 30): `QRCodePanel.test.tsx` (não dispara warning de unmount durante fetch em voo, mostra mensagem pareada, render imagem QR), `MessageList.test.tsx` (placeholder vazio, scroll mexe no viewport, role="log" + aria-live), `ConversationList.test.tsx` (placeholder, dot de status, onSelect, aria-current).
+
+**Dificuldades:**
+- Lint ficou irritante porque shadcn `badge.tsx`/`button.tsx` exportam `*Variants` junto do componente (padrão da CLI shadcn). Resolvido via override em `eslint.config.js` em vez de splitar 2 arquivos por primitive.
+- `requestAnimationFrame` precisou ser mockado no teste de `MessageList` — jsdom não dispara automaticamente.
+
+**Trade-offs:**
+- **Não instalei fontes externas** (Geist, JetBrains Mono via @fontsource): manteria a identidade mais distintiva mas adiciona ~70KB de bundle só pra fonts variable. Decidi usar `ui-monospace` (system mono) + system sans, que entregam ~80% do efeito visual sem aumentar bundle. Phase 4 pode revisitar.
+- **Não migrei `useConversationMessages` para `useInfiniteQuery`** ainda — uma página de 50 cobre 95% dos casos; scroll-up infinito vai pra Phase 4.
+- **Bundle cresceu** 432KB → 472KB por causa do Sheet primitive + lucide ChevronLeft + Info. Aceitável.
+- **Descartei animações chamativas** (sliders, parallax). Operations control room deve ser CALMO — só motion semântico (pulse no socket, entrance da bolha).
+
+**Sugestões da IA rejeitadas/alteradas:**
+- IA propôs `Motion` (framer-motion) para animações — rejeitado, CSS keyframes resolvem com 0KB de runtime.
+- IA propôs sortear conversas por nome em mobile (mais "limpo") — mantive ordem por last_message_at desc, é o que o usuário precisa.
+
+**Smoke test:**
+```bash
+cd frontend
+npm run typecheck   # OK
+npm run build       # 244ms, 472KB / gzip 146KB
+npm run lint        # 0 erros (3 → 0 com override de ui/ + remoção do effect QRCodePanel)
+npm run test        # 30/30 passing in 2.81s
+
+docker compose up -d --build frontend
+# Browser: 360x640 → única view; 768x1024 → 2 cols; 1440x900 → 3 cols.
+# Reload mantém /conversations/<id>.
+# Botão "Detalhes" abre Sheet com Lead+QR.
+```
+
+**Tempo:** ~75min.
+
+---
+
 ## 2026-04-25 17:00 — PR #50 / Issue #49: Providers + React Router + refator pra TanStack Query (Spec A — Phase 2 frontend)
 
 **Contexto:** segunda PR do Spec A. Funda a arquitetura: providers (QueryProvider + SocketProvider), rotas (React Router 7), hooks de domínio (TanStack Query) consumindo os endpoints REST do PR #46. Resolve a perda de contexto no reload (URL como fonte da verdade do `activeId`) sem mudar layout (Phase 3 cuida da responsividade).
