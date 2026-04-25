@@ -56,6 +56,11 @@ class Settings(BaseSettings):
     # ===== CORS / Socket.IO =====
     socket_cors_origins: str = "http://localhost:5173"
 
+    # ===== Admin auth (rotas /api/whatsapp/*) =====
+    # Token administrativo para proteger endpoints de gestão da instância WhatsApp.
+    # Frontend envia via header `X-Admin-Token`. Vazio = endpoints desabilitados.
+    admin_api_token: str = ""
+
     @property
     def socket_cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.socket_cors_origins.split(",") if o.strip()]

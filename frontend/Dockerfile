@@ -5,6 +5,10 @@ RUN npm ci
 
 FROM node:24-alpine AS builder
 WORKDIR /app
+ARG VITE_API_URL=http://localhost:8000
+ARG VITE_ADMIN_TOKEN=
+ENV VITE_API_URL=${VITE_API_URL} \
+    VITE_ADMIN_TOKEN=${VITE_ADMIN_TOKEN}
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
