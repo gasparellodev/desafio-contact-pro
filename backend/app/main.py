@@ -33,18 +33,13 @@ async def _process_batch_callback(conversation_id: str, message_ids: list[str]) 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     configure_logging()
-    # Worker do buffer Redis (D.2). Só sobe se debounce > 0; em testes
-    # unitários (debounce=0) o webhook processa síncrono.
-    worker_task: asyncio.Task | None = None
-    if settings.message_buffer_debounce_seconds > 0:
-        redis_client = get_redis()
-        worker_task = asyncio.create_task(
-            buffer_worker(redis_client, process_batch=_process_batch_callback)
-        )
-        logger.info(
-            "buffer_worker_scheduled",
-            extra={"debounce_seconds": settings.message_buffer_debounce_seconds},
-        )
+    # Worker do buffer Redis (D.2). Debounce hardcoded em
+    # `services/message_buffer.DEBOUNCE_SECONDS` (5s).
+    redis_client = get_redis()
+    worker_task: asyncio.Task | None = asyncio.create_task(
+        buffer_worker(redis_client, process_batch=_process_batch_callback)
+    )
+    logger.info("buffer_worker_scheduled")
     try:
         yield
     finally:

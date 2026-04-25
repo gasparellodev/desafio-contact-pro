@@ -114,7 +114,6 @@ async def evolution_webhook(
                 redis_client,
                 conversation_id=str(msg.conversation_id),
                 message_id=str(msg.id),
-                debounce_seconds=settings.message_buffer_debounce_seconds,
             )
         except Exception as exc:  # noqa: BLE001
             logger.exception(

@@ -39,13 +39,18 @@ BUFFER_KEY = "buffer:conv:{conv_id}"
 DEADLINE_KEY = "buffer-deadline:conv:{conv_id}"
 DEADLINE_TTL_SECONDS = 60  # safety net contra leak se DEL falhar
 
+# Debounce hardcoded — 5s é o sweet-spot pra WhatsApp (lead mandando texto
+# rápido em sequência). Não exposto como env var pra reduzir superfície de
+# config no setup do recrutador. Se precisar ajustar, edite aqui.
+DEBOUNCE_SECONDS = 5
+
 
 async def enqueue(
     redis: Redis,
     *,
     conversation_id: str,
     message_id: str,
-    debounce_seconds: int = 5,
+    debounce_seconds: int = DEBOUNCE_SECONDS,
 ) -> None:
     """Adiciona message_id ao buffer da conversa e (re)agenda processamento.
 
