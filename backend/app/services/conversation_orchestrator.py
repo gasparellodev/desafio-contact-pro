@@ -175,6 +175,19 @@ class ConversationOrchestrator:
             # mensagens enviadas pelo próprio bot — ignoramos no pipeline (ack via emit ja sai pelo fluxo OUT)
             return
 
+        # 0. whitelist de números (modo dev). Vazio = aceita todo mundo.
+        from app.core.config import get_settings
+
+        allowed = get_settings().whatsapp_allowed_numbers_list
+        if allowed:
+            phone = jid_to_phone(parsed.remote_jid)
+            if phone not in allowed:
+                logger.info(
+                    "orchestrator_number_not_allowed",
+                    extra={"phone_suffix": phone[-4:] if phone else "?"},
+                )
+                return
+
         # 1. idempotência
         if await self._exists_message(parsed.whatsapp_message_id):
             logger.info("orchestrator_duplicate_ignored", extra={"id": parsed.whatsapp_message_id})
