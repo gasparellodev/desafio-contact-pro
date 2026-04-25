@@ -61,6 +61,18 @@ class Settings(BaseSettings):
     # Frontend envia via header `X-Admin-Token`. Vazio = endpoints desabilitados.
     admin_api_token: str = ""
 
+    # ===== Whitelist de números (modo desenvolvimento) =====
+    # Lista separada por vírgula de números (com ou sem código do país, sem `@s.whatsapp.net`).
+    # Ex: "5511999999999,5521988887777". Vazio = sem filtro (responde todo mundo).
+    # Útil em dev para o bot só responder ao seu próprio número durante testes.
+    whatsapp_allowed_numbers: str = ""
+
+    @property
+    def whatsapp_allowed_numbers_list(self) -> list[str]:
+        """Números normalizados (apenas dígitos)."""
+        raw = [n.strip() for n in self.whatsapp_allowed_numbers.split(",") if n.strip()]
+        return ["".join(c for c in n if c.isdigit()) for n in raw if any(c.isdigit() for c in n)]
+
     @property
     def socket_cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.socket_cors_origins.split(",") if o.strip()]
