@@ -12,10 +12,23 @@ interface Props {
 }
 
 export function MessageList({ messages, thinking }: Props) {
-  const endRef = useRef<HTMLDivElement | null>(null)
+  // Radix ScrollArea expõe o viewport via `[data-slot="scroll-area-viewport"]`.
+  // `scrollIntoView` falha silenciosamente em mobile dentro de Radix porque o
+  // viewport é um div com overflow customizado. Selecionamos o viewport e
+  // mexemos no scrollTop direto — funciona em todos os browsers/devices.
+  const scrollAreaRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+    const root = scrollAreaRef.current
+    if (!root) return
+    const viewport = root.querySelector(
+      '[data-slot="scroll-area-viewport"]'
+    ) as HTMLElement | null
+    if (!viewport) return
+    // Defer to next frame para garantir que a nova bolha já está no DOM.
+    requestAnimationFrame(() => {
+      viewport.scrollTop = viewport.scrollHeight
+    })
   }, [messages.length, thinking])
 
   if (messages.length === 0 && !thinking) {
@@ -27,13 +40,12 @@ export function MessageList({ messages, thinking }: Props) {
   }
 
   return (
-    <ScrollArea className="h-full px-4">
+    <ScrollArea ref={scrollAreaRef} className="h-full px-3 sm:px-4" role="log" aria-live="polite">
       <div className="flex flex-col gap-3 py-4">
         {messages.map((m) => (
           <MessageBubble key={m.id} msg={m} />
         ))}
         {thinking && <AIThinkingIndicator />}
-        <div ref={endRef} />
       </div>
     </ScrollArea>
   )

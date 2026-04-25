@@ -4,29 +4,42 @@
 
 ## Regras
 
-1. **Cleanup obrigatório.** Todo `socket.on(...)` precisa ter um `socket.off(...)` no return do `useEffect`. Sem isso, em StrictMode (dev) o handler é registrado 2× e dispara duplicado.
-2. **Sem fetch dentro de componente.** Componentes consomem hooks. Hooks consomem `lib/api.ts` e `lib/socket.ts`.
-3. **Estado mínimo.** Cada hook expõe só o que o componente precisa renderizar. Para 6h, `useState` + `useReducer` é o suficiente — sem react-query/zustand.
-4. **Sem deps externas inferidas.** Se um hook depende de outro estado, receber via parâmetro (não pegar de contexto sem necessidade).
-5. **Ordem dos efeitos.** Sempre fazer `socket.on(...)` antes do trigger de fetch — evita race em que o evento chega antes do listener.
+1. **TanStack Query é a porta para REST.** Toda leitura de dados de servidor passa por `useQuery`/`useInfiniteQuery` consumindo `lib/api.ts`. Nada de `fetch` direto em componente nem em hook fora de `lib/api.ts`.
+2. **Socket.IO entra via `SocketProvider`, não via hook custom.** `socket.on(...)` só pode aparecer dentro de `providers/SocketProvider.tsx`. Hooks que precisam reagir a evento real-time consomem o cache (`useQuery`) ou o context (`useSocketContext()`).
+3. **Sem fetch em componente.** Componentes consomem hooks; hooks consomem `lib/`.
+4. **Estado mínimo.** Cada hook expõe só o que o componente precisa. Estado UI efêmero pode usar `useState` local; cache de servidor SEMPRE TanStack Query.
+5. **Cleanup obrigatório quando há subscriber externo.** Todo `addEventListener`, `setInterval`, etc. precisa ser desfeito no return do `useEffect`.
+6. **Param opcional → `enabled`.** Hooks que dependem de id devem aceitar `null/undefined` e usar `useQuery({ enabled: Boolean(id) })`.
 
 ## Hooks atuais
 
 | Hook | Responsabilidade |
 |---|---|
-| `useSocket` | Conecta/desconecta o singleton. Usar uma vez no `App`. |
-| `useConnectionStatus` | Estado WhatsApp (open/connecting/close) + QR Code via Socket.IO. |
-| `useConversations` (PR #10) | Lista de conversas + reducers de eventos. |
+| `useConversationsQuery(filters?)` | Lista de conversas via REST. SocketProvider invalida quando chega mensagem (reordenar por last_message_at). |
+| `useConversationMessages(id?)` | Página de mensagens de uma conversa via REST. SocketProvider mescla mensagens novas via `setQueryData`. |
+| `useLead(id?)` | Detalhe completo do Lead via REST. SocketProvider atualiza via `lead.updated`. |
+| `useConnectionStatus()` | Re-export fino do `useSocketContext()` — `{ state, qrcode }` para WhatsApp connection state. |
 
 ## Não fazer
 
-- Conectar o socket dentro de componente que pode desmontar (use o singleton em `lib/socket.ts`).
-- Usar `useState` para guardar derivações de outro estado (use `useMemo`).
-- Setar estado depois de unmount sem checar (`AbortController` em fetches assíncronos).
-- Misturar lógica de UI e de domínio no mesmo hook.
+- `useEffect(() => { fetch(...) })` num hook — use `useQuery` com `queryFn` apontando para `lib/api.ts`.
+- `socket.on(...)` num hook — adicione no `SocketProvider`.
+- Setar estado local pra cachear resposta de REST — TanStack Query já faz cache + dedup.
+- Inventar query key fora de `lib/queryKeys.ts` — quebra invalidação.
+
+## Como adicionar um hook
+
+1. Adicionar typed fetcher em `lib/api.ts` se ainda não existe.
+2. Adicionar key factory em `lib/queryKeys.ts` (`xKeys.detail(id)`).
+3. Criar `useX(id?)` em `hooks/useX.ts` chamando `useQuery({ queryKey: xKeys.detail(id), queryFn: () => fetchX(id), enabled: Boolean(id) })`.
+4. Co-locar teste `useX.test.tsx` mockando `fetch` global via `vi.stubGlobal`.
 
 ## Links
 
 - `lib/socket.ts` — singleton Socket.IO
+- `lib/api.ts` — typed fetchers
+- `lib/queryKeys.ts` — factory de query keys
+- `providers/SocketProvider.tsx` — único ponto de assinatura de eventos socket
+- `providers/socket-context.ts` — Context + `useSocketContext`
 - `types/socket.ts` — contratos de eventos
-- Plano: `/Users/gasparellodev/.claude/plans/o-seu-papel-crystalline-lantern.md`
+- `types/domain.ts` — schemas REST + enums
