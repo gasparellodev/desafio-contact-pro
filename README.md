@@ -143,10 +143,10 @@ Quando a IA classifica `intent=human_handoff` ou `status_suggestion=needs_human`
 - **Sem typing, sem AI, sem resposta automática.**
 
 Pra responder como humano:
-1. UI mostra badge `PAUSADO` no header da conversa pausada (PR 3 — frontend).
-2. Use o input de envio manual: digita texto + clica "Enviar como humano".
-3. Backend chama `POST /api/conversations/{id}/messages` → Evolution `send_text` → mensagem chega no celular do lead.
-4. Quando quiser que o bot volte: clica "Retomar bot" → `POST /api/leads/{id}/resume-bot` → `bot_paused=False`.
+1. UI mostra badge `PAUSADO · humano` âmbar no header da conversa pausada + a lista marca a conversa com `⚑ pausado`.
+2. Input de envio manual aparece automático embaixo das mensagens — digita texto + clica "Enviar".
+3. Backend chama `POST /api/conversations/{id}/messages` → Evolution `send_text` → mensagem chega no celular do lead. Socket.IO `wa.message.sent` mescla no cache da UI sem refetch.
+4. Quando quiser que o bot volte: clica "Retomar bot" no header → `POST /api/leads/{id}/resume-bot` → `bot_paused=False` → badge some, input some.
 
 ### Indicador "digitando..."
 

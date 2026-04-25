@@ -46,6 +46,7 @@ function adaptListItem(items: ReturnType<typeof useConversationsQuery>['data']) 
       lead_goal: null,
       estimated_volume: null,
       status: it.lead.status,
+      bot_paused: it.lead.bot_paused,
       created_at: it.created_at,
       updated_at: it.last_message_at,
     },

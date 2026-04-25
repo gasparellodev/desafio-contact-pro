@@ -22,6 +22,7 @@ const sample: ConversationListResponse = {
         phone: '+5511999990001',
         service_interest: 'unknown',
         status: 'new',
+        bot_paused: false,
       },
       last_intent: null,
       last_message_at: '2026-04-25T15:00:00Z',

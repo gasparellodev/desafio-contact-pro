@@ -7,7 +7,7 @@
 | Pasta | Conteúdo |
 |---|---|
 | `ui/` | Primitives shadcn (button, card, badge, scroll-area, separator, avatar, **sheet**). |
-| `chat/` | ConversationList, MessageList, MessageBubble, AIThinkingIndicator. |
+| `chat/` | ConversationList, MessageList, MessageBubble, AIThinkingIndicator, **ConversationHeader** (badge PAUSADO + botão Retomar), **ManualMessageInput** (envio humano quando paused). |
 | `lead/` | LeadPanel, **LeadSheet** (wrapper Sheet pra mobile/tablet). |
 | `connection/` | QRCodePanel. |
 

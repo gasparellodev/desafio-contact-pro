@@ -17,6 +17,7 @@ function makeItem(overrides: Partial<Lead> = {}, conv: Partial<Conversation> = {
     lead_goal: null,
     estimated_volume: null,
     status: 'new',
+    bot_paused: false,
     created_at: '2026-04-25T14:00:00Z',
     updated_at: '2026-04-25T15:00:00Z',
     ...overrides,

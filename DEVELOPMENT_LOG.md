@@ -841,3 +841,47 @@ docker compose logs backend | grep buffer_worker_scheduled  # → debounce_secon
 - Worker tick 1s = latência adicional 0-1s.
 
 **Tempo:** ~70min.
+
+---
+
+## 2026-04-25 20:30 — PR #69 / Issue #68: frontend pause UI + envio manual (Spec D.3)
+
+**Contexto:** terceira PR do épico #61. Backend D.1 já marcava `Lead.bot_paused=true` quando AI sugeria handoff humano + expunha endpoints REST. Frontend agora mostra esse estado e permite ao admin agir.
+
+**Decisões:**
+- `types/domain.ts` ganha `bot_paused: boolean` em Lead e LeadSummary.
+- `lib/api.ts`: novos fetchers `resumeBot(leadId)` e `sendManualMessage({conversationId, content})`.
+- `hooks/useResumeBot.ts`: mutation TanStack Query. Em sucesso, `setQueryData(leadKeys.detail)` + `invalidateQueries(conversationKeys.lists)`.
+- `hooks/useSendManualMessage.ts`: mutation simples, sem optimistic update — Socket.IO `wa.message.sent` mescla a Message OUT no cache automaticamente.
+- `components/chat/ConversationHeader.tsx` (novo, extraído de `routes/conversation.tsx`): título + slot mobile back + slot direito; quando `lead.bot_paused`, mostra fundo destacado (status-needs-human/10), badge âmbar "Pausado · humano" e botão "Retomar bot" (com `aria-label`).
+- `components/chat/ManualMessageInput.tsx` (novo): textarea (max 4096 chars como o backend) + botão Enviar com spinner; renderizado SÓ quando `lead.bot_paused`. Sem optimistic update (Socket.IO cuida).
+- `components/chat/ConversationList.tsx`: cada item ganha badge âmbar "⚑ pausado" quando `lead.bot_paused`.
+- `routes/conversation.tsx`: substitui CardHeader inline por `<ConversationHeader>`. Renderiza `<ManualMessageInput>` no rodapé do CardContent quando `lead?.bot_paused`.
+- `routes/conversations.tsx` adapter `adaptListItem`: passa `bot_paused: it.lead.bot_paused` (mantém UI sincronizada com a lista).
+
+**Tests Vitest** (4 novos, 58 total):
+- `useResumeBot.test.tsx`: chama URL POST correta, atualiza cache, invalida lista.
+- `useSendManualMessage.test.tsx`: chama URL POST com body `{content}` correto.
+- `ConversationHeader.test.tsx`: não mostra badge/botão quando bot ativo; mostra ambos quando paused; clicar Retomar dispara fetch.
+- `ManualMessageInput.test.tsx`: renderiza textarea+botão; botão disabled quando vazio; envia + limpa input no sucesso.
+
+**Reviews aplicadas:**
+- `vercel:react-best-practices`: ✅ usa `useMutation` (idiomático, sem refetch manual), `setQueryData` no sucesso (sem invalidate desnecessário do detail), aria-labels em botões com ícone, sem inline arrow functions em hot paths.
+- `sentry-skills:code-review`: ✅ optimistic updates evitados (Socket.IO já cobre); textarea com maxLength enforcement no client + backend; aria-live em alert de erro; padrão consistente com outros hooks.
+
+**Smoke:**
+```bash
+cd frontend
+npm run typecheck   # OK
+npm run lint        # 0 erros
+npm run test        # 58/58 in ~4s
+npm run test:coverage   # 85.8% / 68.3% / 87.4% / 91.3% — todos acima dos thresholds 80/60/80/80
+docker compose up -d --build frontend
+```
+
+**Trade-offs:**
+- Sem optimistic update no envio manual — UX é "aperta enviar → spinner → mensagem aparece via socket". Aceitável; spinner é breve (~1s).
+- `ManualMessageInput` esconde quando bot ativo — escolha consciente pra não confundir admin (humano + bot respondendo simultaneamente seria caótico).
+- Indicador `⚑ pausado` na lista usa só badge âmbar — sem ícone ou cor de borda. Discreto mas visível; alternativa seria pintar a linha inteira (intrusivo).
+
+**Tempo:** ~50min.

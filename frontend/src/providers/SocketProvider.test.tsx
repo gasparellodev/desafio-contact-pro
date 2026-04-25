@@ -171,6 +171,7 @@ describe('SocketProvider', () => {
       lead_goal: null,
       estimated_volume: null,
       status: 'qualified',
+      bot_paused: false,
       created_at: '2026-04-25T14:00:00Z',
       updated_at: '2026-04-25T15:30:00Z',
     }
@@ -195,6 +196,7 @@ describe('SocketProvider', () => {
             phone: null,
             service_interest: 'unknown',
             status: 'new',
+            bot_paused: false,
           },
           last_intent: null,
           last_message_at: '2026-04-25T15:00:00Z',
@@ -218,6 +220,7 @@ describe('SocketProvider', () => {
       lead_goal: null,
       estimated_volume: null,
       status: 'qualified',
+      bot_paused: false,
       created_at: '2026-04-25T14:00:00Z',
       updated_at: '2026-04-25T15:30:00Z',
     }
