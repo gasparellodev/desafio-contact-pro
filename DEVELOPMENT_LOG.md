@@ -279,3 +279,32 @@ Formato:
 **Tempo gasto:** ~30 min
 
 **Smoke test:** `from app.services.conversation_orchestrator import ConversationOrchestrator` OK, todas as rotas registradas, sem erros de importação.
+
+---
+
+## 2026-04-25 13:25 — PR #10: Frontend UI completa
+
+**Decisões:**
+- Layout split 12-col: 3 (ConversationList) + 6 (MessageList) + 3 (QRCodePanel + LeadPanel).
+- `useConversations` com `useReducer` (sem zustand/react-query no escopo de 6h). 9 events do socket são reduzidos: `wa.message.received`, `wa.audio.received`, `audio.transcribed`, `wa.message.sent`, `wa.audio.sent`, `ai.response.generated`, `lead.updated`, `conversation.status_changed`, `ai.thinking`.
+- `MessageBubble` distingue tipo (TEXT/AUDIO/IMAGE), exibe transcrição inline em áudio, mostra status badge (sent/failed/etc) e horário.
+- `AIThinkingIndicator` com 3 dots staggered animate-bounce.
+- `QRCodePanel` tem botão "Inicializar instância" que faz POST `/api/whatsapp/instance` + POST `/api/whatsapp/webhook` + GET `/api/whatsapp/qrcode` em sequência. Renderiza imagem do QR embed em base64.
+- `LeadPanel` mostra nome, empresa, telefone, interesse, objetivo, volume estimado, status colorido (success qualified, warning needs_human).
+- Auto-scroll no `MessageList` em cada nova mensagem ou flag de thinking.
+
+**Dificuldades:**
+- TS erro inicial: `conversation.status_changed` typed como `Conversation` mas o backend só envia `{id, last_intent}`. Ajustado para `Partial<Conversation> & {id: string}` no socket.ts.
+- StrictMode + Socket.IO: validei via `useSocket` cleanup que NÃO desconecta — pattern mantém a conexão viva entre re-mounts em dev.
+
+**Trade-offs:**
+- Sem virtualização do `MessageList` — `ScrollArea` + `overflow-y-auto` é suficiente para <500 mensagens (caso típico de uma conversa de qualificação).
+- Sem suporte a múltiplas conversas selecionadas — a UI mostra apenas a `active` (primeira por default ou via `setActiveId`).
+- Sem dark mode toggle — tokens do shadcn já suportam, mas adicionar UI de toggle não é prioridade.
+
+**Sugestões da IA rejeitadas/alteradas:**
+- IA inicial sugeriu `react-hot-toast` para o erro emit. Rejeitei: o `error` evento já vai ser exibido em uma futura iteração; menos uma dep.
+
+**Tempo gasto:** ~30 min
+
+**Smoke test:** `npm run build` → tsc strict + Vite verde (302KB JS gzip 94KB).

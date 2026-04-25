@@ -26,7 +26,7 @@ export interface ServerToClientEvents {
   'wa.reaction.sent': (data: { messageId: string; emoji: string }) => void
 
   'lead.updated': (data: Lead) => void
-  'conversation.status_changed': (data: Conversation) => void
+  'conversation.status_changed': (data: Partial<Conversation> & { id: string }) => void
 
   error: (data: { code?: string; message: string; conversation_id?: string }) => void
 }
