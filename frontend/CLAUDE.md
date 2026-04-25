@@ -54,14 +54,14 @@ src/
     socket.ts                   # singleton Socket.IO (autoConnect: false)
     utils.ts                    # cn()
   routes/
-    index.tsx                   # createBrowserRouter (/, /conversations, /conversations/:id, *)
-    root.tsx                    # layout shell (header + Outlet)
-    conversations.tsx           # rota /conversations(/:id) — lista + (centro+lead)
+    index.tsx                   # createBrowserRouter + React.lazy code-splitting + Suspense fallback
+    root.tsx                    # layout shell (header sticky + sistema-pulse + Outlet)
+    conversations.tsx           # rota /conversations(/:id) — lista responsiva + skeleton
     conversation.tsx            # ConversationView (centro + lead) reusada em /:id
     not-found.tsx               # 404
   test/
     setup.ts                    # jest-dom + cleanup
-    test-utils.tsx              # renderWithProviders + makeTestQueryClient
+    test-utils.tsx              # renderWithProviders + makeTestQueryClient + runAxe (axe-core wrapper)
   types/                        # tipos compartilhados (Message, Lead, eventos socket, REST envelopes)
   index.css                     # @import tailwindcss + theme tokens (OKLCH)
 ```
@@ -122,10 +122,11 @@ npm run test:coverage  # vitest run --coverage (relatório v8)
 - Testes co-located: `Component.test.tsx` ao lado de `Component.tsx`. Hooks: `useFoo.test.ts` ao lado de `useFoo.ts`.
 - Setup global em `src/test/setup.ts` (jest-dom matchers + cleanup pós-teste).
 - Config em `vitest.config.ts` reusa o `vite.config.ts` via `mergeConfig`.
-- Provider stack para render: envolver em `QueryClientProvider` (com `QueryClient` novo por teste para evitar cache cruzado) + `MemoryRouter` (de react-router) quando o componente depender de rota.
-- A11y: usar `axe-core` direto (`const results = await axe(container); expect(results.violations).toEqual([])`) em testes de componentes/rotas críticas. Zero violations.
-- Mocks de Socket.IO: factory em `src/test/factories.ts` (a ser criada na Phase 2) que devolve um socket fake compatível com `socket.io-client`.
-- Coverage alvo: 80%+ statements / 75%+ branches (alvo final, ramping ao longo das fases — Phase 1 ainda sem testes).
+- Provider stack: usar `renderWithProviders(...)` ou `AllProviders` de `src/test/test-utils.tsx` que envolve em `QueryClientProvider` + `MemoryRouter`. Sempre usar `makeTestQueryClient()` por teste (cache isolado).
+- A11y: usar `runAxe(container)` de `src/test/test-utils.tsx` (wrapper sobre `axe-core` com `color-contrast` desligado em jsdom). Asserir `expect(result.violations).toEqual([])`. Zero violations no que está auditado.
+- Mock de fetch: `vi.stubGlobal('fetch', vi.fn(...))` no `beforeEach` + `vi.unstubAllGlobals` no `afterEach`.
+- Mock do socket: `vi.hoisted` factory que constrói um EventEmitter fake, depois `vi.mock('@/lib/socket', () => ({ socket: fakeSocket }))`.
+- Coverage atual (Phase 4 fechado): **statements ≥80% / branches ≥60% / functions ≥80% / lines ≥80%**. Rotas excluídas (E2E Playwright cuida no Spec C). Thresholds em `vitest.config.ts` — qualquer PR que regrida quebra o gate.
 
 ## Não fazer
 

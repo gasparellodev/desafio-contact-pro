@@ -5,6 +5,7 @@
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, type RenderOptions, type RenderResult } from '@testing-library/react'
+import axe, { type RunOptions, type AxeResults } from 'axe-core'
 import { type ReactElement, type ReactNode } from 'react'
 import { MemoryRouter } from 'react-router-dom'
 
@@ -51,4 +52,23 @@ export function renderWithProviders(
     ...options,
   })
   return { ...result, client: testClient }
+}
+
+/**
+ * Roda axe-core sobre um container DOM e retorna o resultado. Use para
+ * asserir `expect(result.violations).toEqual([])` em testes de a11y.
+ *
+ * `disableRules` pode silenciar regras irrelevantes ao escopo (ex: testes que
+ * renderizam um componente isolado fora de um landmark, color-contrast em
+ * jsdom que não computa cor real, etc).
+ */
+export async function runAxe(
+  container: Element,
+  options: RunOptions = {}
+): Promise<AxeResults> {
+  return axe.run(container, {
+    // jsdom não computa contraste real; desligamos pra evitar falsos positivos.
+    rules: { 'color-contrast': { enabled: false } },
+    ...options,
+  })
 }

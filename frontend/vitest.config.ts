@@ -24,10 +24,18 @@ export default mergeConfig(
           'src/test/**',
           'src/**/*.d.ts',
           'src/components/ui/**', // primitives shadcn copiados — não testar
+          'src/routes/**', // cobertura via E2E Playwright (Spec C)
+          'src/lib/socket.ts', // singleton trivial (io(url, opts))
+          'src/lib/query-client.ts', // factory chamada via useState lazy
         ],
+        // Thresholds calibrados pelo estado atual (Phase 4): hooks/providers/lib/
+        // components com cobertura sólida. Rotas excluídas (E2E cuidam). Qualquer
+        // PR futuro deve manter ou subir; baixar exige justificativa.
         thresholds: {
-          // Phase 1 ainda sem testes; thresholds reais entram na Phase 5.
-          // Mantemos a chave aqui só de placeholder para a infraestrutura.
+          statements: 80,
+          branches: 60,
+          functions: 80,
+          lines: 80,
         },
       },
     },

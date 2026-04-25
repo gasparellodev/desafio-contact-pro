@@ -52,6 +52,10 @@ uv.lock.bak
 .coverage.*
 htmlcov/
 .hypothesis/
+# Vitest / v8 coverage HTML reports
+frontend/coverage/
+**/coverage/lcov-report/
+**/coverage/lcov.info
 .mypy_cache/
 .ruff_cache/
 
