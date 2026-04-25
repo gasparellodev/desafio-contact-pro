@@ -40,6 +40,7 @@ from app.models.message import Message
 from app.services.ai.base import AIProvider, AIResponse, ChatTurn
 from app.services.ai.factory import get_ai_provider
 from app.services.ai.prompts import build_system_prompt
+from app.services.transcription.openai_stt import OpenAITranscriber, get_transcriber
 from app.services.whatsapp.evolution_client import (
     EvolutionAPIError,
     EvolutionClient,
@@ -96,10 +97,12 @@ class ConversationOrchestrator:
         session: AsyncSession,
         ai: AIProvider | None = None,
         whatsapp: EvolutionClient | None = None,
+        transcriber: OpenAITranscriber | None = None,
     ) -> None:
         self.session = session
         self.ai = ai or get_ai_provider()
         self.whatsapp = whatsapp or get_evolution_client()
+        self.transcriber = transcriber or get_transcriber()
 
     # ----- repository helpers (inline para 6h) -----
 
@@ -209,8 +212,25 @@ class ConversationOrchestrator:
         except EvolutionAPIError as exc:
             logger.warning("reaction_failed", extra={"error": str(exc)})
 
-        # 5. (texto only por enquanto — STT/Vision nos PRs seguintes)
-        ai_input_text = parsed.text or "[mensagem sem texto]"
+        # 5. áudio → STT (Whisper); imagem → vision (PR #14)
+        ai_input_text = parsed.text or ""
+        if parsed.message_type == MessageType.AUDIO:
+            transcription = await self._transcribe_audio(parsed)
+            if transcription:
+                msg_in.transcription = transcription
+                self.session.add(msg_in)
+                await self.session.commit()
+                await self.session.refresh(msg_in)
+                await emit_to_conversation(
+                    str(conv.id),
+                    "audio.transcribed",
+                    {"messageId": str(msg_in.id), "transcription": transcription},
+                )
+                ai_input_text = transcription
+            else:
+                ai_input_text = "[áudio recebido sem transcrição disponível]"
+        if not ai_input_text:
+            ai_input_text = "[mensagem sem texto]"
 
         # 6. AI thinking + chamada
         await emit_to_conversation(
@@ -320,6 +340,39 @@ class ConversationOrchestrator:
         await self._send_smart_reaction(parsed, self._reaction_for_status(lead.status))
 
     # ----- helpers -----
+
+    async def _transcribe_audio(self, parsed: ParsedMessage) -> str:
+        """Baixa o áudio (se ainda não veio em base64) e transcreve via Whisper."""
+        import base64
+
+        b64 = parsed.media_base64
+        mime = parsed.media_mime
+        if not b64:
+            try:
+                media = await self.whatsapp.download_media_base64(
+                    {
+                        "id": parsed.whatsapp_message_id,
+                        "remoteJid": parsed.remote_jid,
+                        "fromMe": False,
+                    }
+                )
+            except EvolutionAPIError as exc:
+                logger.warning("audio_download_failed", extra={"error": str(exc)})
+                return ""
+            b64 = media.get("base64")
+            mime = media.get("mimetype") or mime or "audio/ogg"
+        if not b64:
+            return ""
+        try:
+            audio_bytes = base64.b64decode(b64)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("audio_decode_failed", extra={"error": str(exc)})
+            return ""
+        try:
+            return await self.transcriber.transcribe(audio_bytes=audio_bytes, mime_type=mime)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("stt_pipeline_failed", extra={"error": str(exc)})
+            return ""
 
     @staticmethod
     def _reaction_for_status(status: LeadStatus) -> str:
