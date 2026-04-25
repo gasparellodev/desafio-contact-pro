@@ -1,6 +1,12 @@
-import { useEffect, useState } from 'react'
+/**
+ * Re-export das infos de conexão a partir do SocketProvider.
+ *
+ * Antes da Phase 2, este hook fazia `socket.on(...)` direto. Agora o
+ * SocketProvider centraliza handlers e expõe via Context — evita N
+ * subscribers para o mesmo evento.
+ */
 
-import { socket } from '@/lib/socket'
+import { useSocketContext } from '@/providers/socket-context'
 import type { ConnectionState } from '@/types/domain'
 
 interface ConnectionInfo {
@@ -8,28 +14,7 @@ interface ConnectionInfo {
   qrcode: string | null
 }
 
-/**
- * Acompanha o estado da conexão WhatsApp e o QR Code emitido pelo backend.
- * Usa eventos `wa.connection.update` e `wa.qrcode.updated`.
- */
 export function useConnectionStatus(): ConnectionInfo {
-  const [state, setState] = useState<ConnectionState>('unknown')
-  const [qrcode, setQrcode] = useState<string | null>(null)
-
-  useEffect(() => {
-    const onConnection = (data: { state: ConnectionState }) => {
-      setState(data.state)
-      if (data.state === 'open') setQrcode(null)
-    }
-    const onQr = (data: { qrcode: string | null }) => setQrcode(data.qrcode)
-
-    socket.on('wa.connection.update', onConnection)
-    socket.on('wa.qrcode.updated', onQr)
-    return () => {
-      socket.off('wa.connection.update', onConnection)
-      socket.off('wa.qrcode.updated', onQr)
-    }
-  }, [])
-
-  return { state, qrcode }
+  const { waState, qrcode } = useSocketContext()
+  return { state: waState, qrcode }
 }
