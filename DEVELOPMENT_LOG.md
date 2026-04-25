@@ -394,3 +394,42 @@ LeadPanel + status pills + intent badges já estavam no PR #10. Marcado completo
 | #34 body cap | #36 | ✅ merged |
 | #33 admin auth proxy | #37 | ✅ merged |
 | #35 schema derivation | (pending PR C) | ⏳ open |
+
+---
+
+## 2026-04-25 16:30 — Issue #45: REST read endpoints (Spec A — Phase 1 backend)
+
+**Contexto:** parte do épico #44 (Spec A: frontend overhaul + backend read APIs). Brainstorming registrado em `/Users/gasparellodev/.claude/plans/precisamos-criar-um-plano-abstract-wombat.md`. Frontend hoje constrói estado só via Socket.IO em tempo real; reload zera tudo porque não há endpoint REST para rehidratar da Postgres (que já persiste tudo). Esta PR fecha esse buraco do lado do backend, sem tocar frontend ainda.
+
+**Decisões:**
+- 4 endpoints novos, todos sob `Depends(require_admin_token)` (consistência com `whatsapp.py`):
+  - `GET /api/conversations` — paginação offset+limit (50 default, 200 max), filtros opcionais `status` (LeadStatus) e `q` (ILIKE em name/phone/whatsapp_jid). Ordenação por `last_message_at desc`. Envelope `ConversationList { items, total, limit, offset }`.
+  - `GET /api/conversations/{id}` — detalhe (sem mensagens) com `LeadSummary` embutido.
+  - `GET /api/conversations/{id}/messages` — paginação cursor `before` timestamp, retorna em ordem cronológica ascendente. Envelope `MessagePage { items, next_before, limit }`. Padrão clássico de infinite scroll up para chat.
+  - `GET /api/leads/{id}` — `LeadRead` completo.
+- Pydantic schemas explícitos em `app/schemas/{lead,conversation}.py` (com `ConfigDict(from_attributes=True)`). Pasta `schemas/` estava vazia — nova convenção `<X>Read`/`<X>Summary`/`<X>ListItem`/`<X>List`/`<X>Page` documentada em `app/schemas/CLAUDE.md` (criado).
+- `app/api/CLAUDE.md` foi criado também (era referenciado pelo CLAUDE.md raiz mas não existia).
+- Infra de testes: `tests/conftest.py` usando **testcontainers Postgres 16-alpine** (mesma imagem do compose) por sessão pytest, engine async com `NullPool` por teste, `httpx.AsyncClient` via `ASGITransport`, override de `get_session` para apontar pro engine de teste. Headers de admin já injetados no client.
+- 17 testes cobrindo: pagination (offset+limit), filters (status), search (q em name/phone/jid), ordering (last_message_at), 404 (conversation/lead missing), auth (401 sem token), cursor pagination (`before`/`next_before`), validação Pydantic (`limit>200` → 422). 100% cobertura dos schemas.
+
+**Dificuldades:**
+- Primeira tentativa do conftest deu `cannot perform operation: another operation is in progress` (asyncpg compartilhando connection entre fixtures). Fix: `NullPool` no engine para que cada session pegue conexão fresca.
+- Segunda tentativa deu `Event loop is closed` no teardown (session-scoped engine + função-scoped tests = mismatch de event loop). Fix: engine **função-scoped**; `create_all` é idempotente sobre Postgres já inicializado, custo trivial. Container continua session-scoped (startup ~3-5s).
+- Pivotei `asyncio_default_fixture_loop_scope` de `session` para `function` por consistência.
+
+**Trade-offs:**
+- Engine recriado por teste é levemente mais lento que session-scoped, mas elimina toda complexidade de loop scope. 17 testes em ~5s é aceitável; revisita se passar de 30s.
+- Não usei factory-boy ainda — Spec B vai introduzir. Para esta fase, helpers inline (`_seed_pair`, `_make_lead`) são suficientes e mais legíveis.
+- TRUNCATE no setup do engine (não teardown) garante limpeza mesmo se teste anterior crashou no meio. Custo de uma query a mais é desprezível.
+
+**Sugestões da IA rejeitadas/alteradas:**
+- Considerei adicionar `last_message_preview` direto em `ConversationListItem` via subquery, mas mantive fora do v1 — UI pode pegar ao abrir conversa, e schema fica mais simples. Adicionar na v2 se for necessário pelo design da `frontend-design`.
+- Considerei testcontainers com `aiosqlite` em memória pra rodar sem Docker, mas modelo usa `PG_UUID` direto — não funciona em SQLite sem TypeDecorator. Postgres real é mais correto e o repo já depende de Docker para tudo.
+
+**Smoke test:**
+```bash
+cd backend && uv run pytest tests/api -v   # 17 passed in 4.63s
+uv run pytest tests/api --cov=app/schemas --cov-report=term-missing   # 100%
+```
+
+**Tempo:** ~50min (incluindo brainstorming, plano, infra de testes e iteração no conftest).
