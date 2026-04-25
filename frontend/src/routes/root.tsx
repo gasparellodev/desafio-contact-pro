@@ -1,20 +1,24 @@
 /**
  * Layout shell. Header sticky com sistema-pulse + área principal flex-1.
  *
- * Layout responsivo é resolvido pelas próprias rotas (`conversations.tsx`),
- * não aqui — esta camada cuida só do header e do container.
+ * O badge `wa:` é clicável — abre `WhatsAppStatusSheet` com o `QRCodePanel`
+ * (estado/parear). Status WhatsApp é GLOBAL, então fica no header em vez de
+ * misturar com `LeadSheet` per-conversa (vide issue #59).
  */
 
+import { useState } from 'react'
 import { Outlet } from 'react-router-dom'
 
+import { WhatsAppStatusSheet } from '@/components/connection/WhatsAppStatusSheet'
 import { Badge } from '@/components/ui/badge'
 import { useConnectionStatus } from '@/hooks/useConnectionStatus'
-import { useSocketContext } from '@/providers/socket-context'
 import { cn } from '@/lib/utils'
+import { useSocketContext } from '@/providers/socket-context'
 
 export function RootLayout() {
   const { connected } = useSocketContext()
-  const { state } = useConnectionStatus()
+  const { state, qrcode } = useConnectionStatus()
+  const [statusSheetOpen, setStatusSheetOpen] = useState(false)
 
   return (
     <div className="bg-background text-foreground flex h-dvh flex-col">
@@ -40,14 +44,26 @@ export function RootLayout() {
               <span className="hidden sm:inline">socket: </span>
               {connected ? 'on' : 'off'}
             </Badge>
-            <Badge
-              variant={
-                state === 'open' ? 'success' : state === 'connecting' ? 'warning' : 'secondary'
-              }
+            <button
+              type="button"
+              onClick={() => setStatusSheetOpen(true)}
+              aria-label={`Abrir status do WhatsApp (atual: ${state})`}
+              className="rounded-md focus-visible:outline-ring/60 focus-visible:outline-2"
             >
-              <span className="hidden sm:inline">wa: </span>
-              {state}
-            </Badge>
+              <Badge
+                variant={
+                  state === 'open'
+                    ? 'success'
+                    : state === 'connecting'
+                      ? 'warning'
+                      : 'secondary'
+                }
+                className="cursor-pointer hover:opacity-80 transition-opacity"
+              >
+                <span className="hidden sm:inline">wa: </span>
+                {state}
+              </Badge>
+            </button>
           </div>
         </div>
       </header>
@@ -55,6 +71,13 @@ export function RootLayout() {
       <main className="mx-auto flex w-full max-w-[1400px] flex-1 overflow-hidden">
         <Outlet />
       </main>
+
+      <WhatsAppStatusSheet
+        open={statusSheetOpen}
+        onOpenChange={setStatusSheetOpen}
+        state={state}
+        qrcode={qrcode}
+      />
     </div>
   )
 }

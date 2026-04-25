@@ -728,3 +728,37 @@ docker compose up -d --build frontend
 Para testes: `cd backend && uv sync && uv run pytest tests -v` (~5s) + `cd frontend && npm install && npm run test` (~4s).
 
 **Tempo:** ~30min.
+
+---
+
+## 2026-04-25 19:00 — PR #60 / Issue #59: separa status WhatsApp (global) do LeadSheet (per-conversa)
+
+**Contexto:** bug de UX reportado pelo usuário em mobile/tablet. O `LeadSheet` (acionado pelo botão "Detalhes" no header da conversa) misturava `LeadPanel` (per-conversa) com `QRCodePanel` (global) — confundia, parecia que "Conectado" era do lead.
+
+**Decisões:**
+- `LeadSheet.tsx` agora renderiza **só** `LeadPanel`. Título virou "Detalhes do lead" (era "Detalhes da conversa"). Props `state`/`qrcode` removidas.
+- Novo `components/connection/WhatsAppStatusSheet.tsx` — Sheet dedicado ao status global. Recebe `open`/`onOpenChange`/`state`/`qrcode`.
+- `routes/root.tsx`: badge `wa: <state>` no header virou **clicável** (`<button>` envolvendo o `<Badge>` com `aria-label`). Click abre `WhatsAppStatusSheet`. Funciona em qualquer viewport (mobile/tablet/desktop) — em desktop o `QRCodePanel` continua na sidebar direita das rotas, então o Sheet é redundante mas inofensivo.
+- `routes/conversation.tsx`: import de `useConnectionStatus` removido (não mais necessário); `LeadSheet` chamado sem `state`/`qrcode`.
+
+**Trade-offs:**
+- Manter o `WhatsAppStatusSheet` acessível em desktop (mesmo com `QRCodePanel` já na sidebar) é redundância pequena — preferível a esconder o trigger dependendo do viewport (testes ficariam mais frágeis e o usuário pode achar conveniente clicar no badge mesmo no desktop pra confirmar).
+- O texto do `SheetDescription` ("Pareie aqui caso a conexão tenha caído.") cobre o caso de pareamento — botão "Inicializar instância" do `QRCodePanel` continua presente quando state ≠ open.
+
+**Smoke:**
+```bash
+cd frontend
+npm run typecheck   # OK
+npm run lint        # 0 erros
+npm run test        # 49/49 in ~5s
+npm run build       # initial 443KB / gzip 139KB; conversations chunk 33KB / 10KB
+
+docker compose up -d --build frontend
+```
+
+Manual:
+- Mobile: "Detalhes" no header da conversa abre Sheet só com Lead.
+- Mobile: clicar no badge `wa: open` no header abre Sheet "Status WhatsApp" com `QRCodePanel`.
+- Desktop: comportamento da sidebar mantido.
+
+**Tempo:** ~20min.

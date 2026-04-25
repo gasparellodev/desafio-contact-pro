@@ -12,7 +12,6 @@ import { MessageList } from '@/components/chat/MessageList'
 import { LeadSheet } from '@/components/lead/LeadSheet'
 import { MessageListSkeleton } from '@/components/Skeletons'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { useConnectionStatus } from '@/hooks/useConnectionStatus'
 import { useConversationMessages } from '@/hooks/useConversationMessages'
 import { useLead } from '@/hooks/useLead'
 import { useSocketContext } from '@/providers/socket-context'
@@ -33,7 +32,6 @@ export function ConversationView({
   leadId,
   mobileBackButton,
 }: ConversationViewProps) {
-  const { state, qrcode } = useConnectionStatus()
   const { thinking } = useSocketContext()
   const messages = useConversationMessages(conversationId)
   const listEntry = listItems.find((it) => it.conversation.id === conversationId)
@@ -50,7 +48,7 @@ export function ConversationView({
           <CardTitle className="truncate text-sm">{headerLabel}</CardTitle>
         </div>
         <div className="flex shrink-0 items-center gap-2 lg:hidden">
-          <LeadSheet lead={leadQuery.data ?? null} state={state} qrcode={qrcode} />
+          <LeadSheet lead={leadQuery.data ?? null} />
         </div>
       </CardHeader>
       <CardContent className="flex-1 overflow-hidden p-0">
