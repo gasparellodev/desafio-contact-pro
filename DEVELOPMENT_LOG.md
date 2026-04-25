@@ -141,3 +141,29 @@ Formato:
 **Tempo gasto:** ~15 min
 
 **Smoke test:** `docker compose config --quiet` → válido (warnings esperados sobre vars sem `.env`).
+
+---
+
+## 2026-04-25 11:25 — PR #5: DB models (Lead/Conversation/Message) + initial migration
+
+**Decisões:**
+- 3 tabelas: `leads`, `conversations`, `messages`. Todas as enums (LeadStatus, ServiceInterest, Intent, Direction, MessageType, MessageStatus) armazenadas como `VARCHAR` para evitar bug do Alembic com pg.ENUM.
+- PK UUID em todas (Postgres native via `PG_UUID(as_uuid=True)`).
+- `whatsapp_jid` UNIQUE em leads, `whatsapp_message_id` UNIQUE em messages → idempotência de webhooks.
+- FKs com `ondelete="CASCADE"` (Conversation→Lead, Message→Conversation).
+- Migration `0001_init` escrita à mão (sem rodar autogenerate) por dois motivos: (1) Postgres não está rodando localmente; (2) o autogenerate gera lixo com Enums e índices, sempre exige edição manual depois.
+- `app/db/base.py` importa todos os models para SQLModel.metadata enxergar.
+
+**Dificuldades:**
+- Alembic autogenerate exige Postgres rodando — preferi escrever a migration manual e validar via inspeção dos objetos `__table__` em Python (`SQLModel.metadata.tables`). Confirma colunas e índices.
+
+**Trade-offs:**
+- Sem ENUM nativo no Postgres = sem validação na borda do banco. Mitigação: validação Pydantic em todo I/O da camada de aplicação.
+- Sem `relationship()` declarativo (Lead.conversations, etc.) por enquanto — se for necessário no orchestrator (PR #9), adiciono lá.
+
+**Sugestões da IA rejeitadas/alteradas:**
+- IA sugeriu inicialmente `Field(default=LeadStatus.NEW)` direto. Substituído por `sa_column=Column(String(32), ..., default=LeadStatus.NEW.value)` para garantir que o tipo SQL seja `VARCHAR` mesmo se SQLModel tentar inferir Enum nativo.
+
+**Tempo gasto:** ~15 min
+
+**Smoke test:** `from app.db.base import *` — 3 tabelas, todas as colunas e enums batem com a spec do desafio.
