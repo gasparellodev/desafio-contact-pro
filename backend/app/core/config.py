@@ -47,6 +47,11 @@ class Settings(BaseSettings):
     # ===== Redis =====
     redis_url: str = "redis://redis:6379"
 
+    # ===== Message buffer (debounce de mensagens consecutivas) =====
+    # Lead manda 3 mensagens em < N segundos → 1 só processamento de IA.
+    # Reduz custo + dá contexto agregado pra resposta. 0 = desliga buffer.
+    message_buffer_debounce_seconds: int = Field(default=5, ge=0, le=60)
+
     # ===== Evolution API =====
     evolution_api_url: str = "http://evolution:8080"
     evolution_api_key: str = ""

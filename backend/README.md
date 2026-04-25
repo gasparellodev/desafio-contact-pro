@@ -88,6 +88,16 @@ tests/                     # pytest async + testcontainers (23 testes hoje)
 - `POST /api/conversations/{id}/messages` (admin) — **humano envia mensagem manual** (handoff).
 - `GET /api/leads/{id}` (admin) — detalhe completo do lead.
 - `POST /api/leads/{id}/resume-bot` (admin) — **libera bot quando estiver pausado por handoff**.
+
+## Worker do buffer (Spec D.2)
+
+Lifespan do FastAPI agenda `asyncio.create_task(buffer_worker(...))` no startup. O worker:
+
+1. A cada 1s, faz `SCAN buffer-deadline:conv:*` no Redis.
+2. Para cada deadline expirado: `LRANGE` + `DEL` atômico → callback `process_pending(conv_id, [msg_ids])`.
+3. Cancelado no shutdown via `task.cancel()`.
+
+`MESSAGE_BUFFER_DEBOUNCE_SECONDS=0` no `.env` desliga o worker (modo legacy: webhook processa síncrono). Útil em testes unitários.
 | Pydantic schema | `app/schemas/<nome>.py` (`<X>Read`/`<X>Summary`/`<X>ListItem`/`<X>List`/`<X>Page`) | [`app/schemas/CLAUDE.md`](./app/schemas/CLAUDE.md) |
 | Service | `app/services/<nome>/` | [`app/services/CLAUDE.md`](./app/services/CLAUDE.md) |
 | Model + migration | `app/models/<nome>.py` + `uv run alembic revision --autogenerate -m "..."` | [`app/models/CLAUDE.md`](./app/models/CLAUDE.md) |

@@ -47,6 +47,10 @@ class Message(SQLModel, table=True):
         sa_column=Column(PG_UUID(as_uuid=True), nullable=True),
     )
     error_reason: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
+    processed_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
     created_at: datetime = Field(
         default_factory=_now,
         sa_column=Column(DateTime(timezone=True), nullable=False, default=_now, index=True),

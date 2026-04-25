@@ -18,6 +18,16 @@ Cérebro do sistema. Recebe `ParsedMessage` do webhook Evolution e administra to
 8. **Skip-when-paused.** Se `lead.bot_paused = True`: persistimos a Message IN, emitimos `wa.message.received`, mandamos reaction 👍 (fire-and-forget) e **retornamos**. Sem typing, sem AI, sem resposta. Humano responde via UI (`POST /api/conversations/{id}/messages`).
 9. **Auto-pause em handoff.** Quando AI retorna `intent == HUMAN_HANDOFF` ou `status_suggestion == NEEDS_HUMAN`, marcamos `lead.bot_paused = True` ANTES de mandar a resposta. A última fala da IA ainda vai (avisar o lead que vai transferir); próximas mensagens caem no skip. Admin retoma com `POST /api/leads/{id}/resume-bot`.
 10. **Typing indicator.** Antes de chamar AI, `evolution.send_presence(composing, delay=8000)` em try/except. Falha NÃO interrompe pipeline (Evolution offline ou método não suportado vira só warning).
+11. **Buffer + debounce (D.2).** Webhook chama `persist_incoming` (steps 1-5) + `enqueue` no Redis. Worker async no lifespan agrega N mensagens consecutivas (debounce `MESSAGE_BUFFER_DEBOUNCE_SECONDS`, default 5s) em **1 só chamada de IA** via `process_pending`. Reduz custo + dá contexto agregado.
+12. **`Message.processed_at` é a marca de idempotência do batch.** Worker pode reler a mesma lista se crashar entre LRANGE e DEL no Redis; `process_pending` filtra `processed_at IS NULL` antes de chamar IA. Marca todas as mensagens como `processed_at = NOW` ao final (sucesso OU falha — evita retry infinito).
+
+### API pública do orchestrator (3 entry-points)
+
+| Método | Quando usar | O que faz |
+|---|---|---|
+| `persist_incoming(parsed) -> Message \| None` | Webhook real (D.2). Steps 1-5: persist IN + reactions + STT/vision + skip-when-paused. Retorna `None` se descartada (from_me/duplicata/pausada). |
+| `process_pending(conv_id, [msg_ids])` | Worker do buffer (D.2). Steps 6-11 batched: AI single-call agregando N mensagens, persiste 1 OUT, send + smart reaction. Marca `processed_at` ao final. |
+| `handle_incoming(parsed)` | Single-message legacy. Equivale a `persist_incoming` + `process_pending([msg.id])` em sequência. Mantido pra back-compat de testes/scripts. |
 
 ### Pipeline (texto)
 

@@ -345,17 +345,6 @@ Resumo no [`docs/decisions.md`](./docs/decisions.md). Os principais:
 - **Verificação ponta-a-ponta** está documentada em `docs/usage.md` (16 passos cobrindo texto/áudio/imagem/persistência/reset).
 - A validação **end-to-end com chaves reais** depende do usuário rodar `docker compose up` com `.env` preenchido — todos os smoke tests intermediários passaram.
 
-### Tempo aproximado de execução
-
-- **Brainstorm + plano + validações técnicas**: ~50 min
-- **PRs #1–4 (setup repo, scaffolding backend/frontend, docker-compose)**: ~80 min
-- **PRs #5–9 (DB, Evolution client, Socket.IO, AI providers, orchestrator)**: ~120 min
-- **PR #10 (UI completa)**: ~30 min
-- **PRs #11–14 (audio in/out, vision)**: ~75 min
-- **PR #16 (docs final)**: ~30 min
-
-**Total ≈ 6 horas** (cumpriu o prazo).
-
 ---
 
 ## Status do desafio
