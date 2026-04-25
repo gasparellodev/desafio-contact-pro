@@ -12,7 +12,11 @@ Inbox web em tempo real para acompanhar conversas do chatbot WhatsApp. Lista de 
 - Tailwind v4 via `@tailwindcss/vite` (sem postcss.config.js)
 - shadcn/ui (style new-york, base color neutral, OKLCH tokens)
 - socket.io-client 4.x (compatível com python-socketio 5.x)
+- React Router 7 — URL é fonte da verdade do `activeId` (deep-linkable, sobrevive a reload)
+- TanStack Query 5 — cache de REST + merge de deltas Socket.IO via `queryClient.setQueryData()`
 - lucide-react para ícones
+- Vitest 2 + Testing Library 16 + jsdom 25 para unit/component tests
+- axe-core para checagens a11y em testes
 - Path alias `@/*` → `src/*`
 
 ## Princípios não-negociáveis
@@ -50,10 +54,15 @@ src/
 
 ```bash
 npm install
-npm run dev        # http://localhost:5173 (host: true para Docker)
-npm run build      # tsc -b && vite build
-npm run preview    # serve a build em :5173
-npm run lint       # eslint
+npm run dev            # http://localhost:5173 (host: true para Docker)
+npm run build          # tsc -b && vite build
+npm run preview        # serve a build em :5173
+npm run lint           # eslint
+npm run typecheck      # tsc -b --noEmit (não gera bundle)
+npm run test           # vitest run (uma vez)
+npm run test:watch     # vitest interativo
+npm run test:ui        # @vitest/ui no browser
+npm run test:coverage  # vitest run --coverage (relatório v8)
 ```
 
 ## Como adicionar um componente shadcn novo
@@ -82,12 +91,23 @@ npm run lint       # eslint
 - Plugin oficial: `@tailwindcss/vite` no `vite.config.ts`.
 - Tokens em **OKLCH**, não HSL (decisão dos defaults v4 do shadcn).
 
+## Convenção de testes (Vitest)
+
+- Testes co-located: `Component.test.tsx` ao lado de `Component.tsx`. Hooks: `useFoo.test.ts` ao lado de `useFoo.ts`.
+- Setup global em `src/test/setup.ts` (jest-dom matchers + cleanup pós-teste).
+- Config em `vitest.config.ts` reusa o `vite.config.ts` via `mergeConfig`.
+- Provider stack para render: envolver em `QueryClientProvider` (com `QueryClient` novo por teste para evitar cache cruzado) + `MemoryRouter` (de react-router) quando o componente depender de rota.
+- A11y: usar `axe-core` direto (`const results = await axe(container); expect(results.violations).toEqual([])`) em testes de componentes/rotas críticas. Zero violations.
+- Mocks de Socket.IO: factory em `src/test/factories.ts` (a ser criada na Phase 2) que devolve um socket fake compatível com `socket.io-client`.
+- Coverage alvo: 80%+ statements / 75%+ branches (alvo final, ramping ao longo das fases — Phase 1 ainda sem testes).
+
 ## Não fazer
 
 - Importar componente shadcn de `node_modules` — a cópia local em `src/components/ui/` é o source of truth.
-- Usar `useEffect` com array de deps vazio para fazer fetch dentro do componente — extraia para hook.
+- Usar `useEffect` com array de deps vazio para fazer fetch dentro do componente — extraia para hook (preferir `useQuery` do TanStack Query).
 - Tocar em `src/index.css` para customizar tema fora de `@theme inline` (vira inconsistente).
-- Adicionar Storybook, react-query, redux ou outro framework heavy — fora do escopo do desafio.
+- Storybook, redux, jotai — fora do escopo. (TanStack Query e React Router agora são parte da stack — ver Spec A do plano em `/Users/gasparellodev/.claude/plans/precisamos-criar-um-plano-abstract-wombat.md`.)
+- `socket.connect()` num `useEffect` sem `socket.disconnect()` no cleanup — leak garantido em StrictMode.
 
 ## Links
 

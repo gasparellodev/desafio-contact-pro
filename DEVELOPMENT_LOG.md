@@ -443,3 +443,42 @@ curl -H "X-Admin-Token: $TOKEN" 'http://localhost:8000/api/conversations?q=%25' 
 ```
 
 **Tempo:** ~70min (incluindo brainstorming, plano, infra de testes, iteração no conftest, 2 reviews, fixup, PR).
+
+---
+
+## 2026-04-25 16:40 — PR #48 / Issue #47: Frontend tooling — Vitest+RTL+axe+Router+TanStack Query (Spec A — Phase 1 frontend)
+
+**Contexto:** Phase 1 frontend do Spec A (épico #44). Andaime puro, sem mudança de UI. Prepara terreno para fases 2-5 (rotas, persistência via REST+URL, responsivo mobile-first, a11y, perf).
+
+**Decisões:**
+- **Deps adicionadas** (versões reais conferidas no npm em abr/2026):
+  - Runtime: `react-router-dom@^7.14.0`, `@tanstack/react-query@^5.100.0`.
+  - Dev: `vitest@^4.1.0` (não v2 como o plano dizia — npm hoje só tem v4), `@vitest/ui`, `@vitest/coverage-v8` na mesma major; `@testing-library/react@^16.3.0`, `@testing-library/user-event@^14.6.0`, `@testing-library/jest-dom@^6.9.0`, `jsdom@^29.0.0`, `axe-core@^4.11.0`.
+- **`vitest.config.ts`** usa `mergeConfig(viteConfig, ...)` — fonte única de alias `@/*` e plugins. `environment: jsdom`, `globals: true`, `setupFiles: ['./src/test/setup.ts']`. Coverage `provider: v8`, exclui `main.tsx`/`test/**`/`components/ui/**` (primitives shadcn copiados não merecem cobertura). Thresholds em branco — Phase 5 vai fixar 80%/75%.
+- **`src/test/setup.ts`** importa `@testing-library/jest-dom/vitest` + `cleanup()` em `afterEach` (RTL 16 não auto-limpa).
+- **Scripts novos**: `test` (`vitest run --passWithNoTests`), `test:watch`, `test:ui`, `test:coverage`, `typecheck` (`tsc -b --noEmit` separado do `build`).
+- **`tsconfig.app.json`** adiciona `vitest/globals` em `types`.
+- **`frontend/CLAUDE.md`** atualizado: stack inclui Router + TanStack Query + Vitest + axe; nova seção "Convenção de testes"; revogação explícita da regra antiga "não adicionar react-query/redux" (era para a entrega de 6h, Spec A reabre); lista de comandos completa.
+- **Sanity test** em `src/test/sanity.test.tsx` (3 testes: render, jest-dom matcher, alias `@/*`) — confirma que toda a cadeia funciona. Será apagado quando Phase 2 trouxer testes reais.
+
+**Smoke test:**
+```bash
+cd frontend
+npm install              # 111 packages added, 0 vulnerabilities
+npm run lint             # 3 erros pré-existentes — não introduzidos aqui
+npm run typecheck        # OK
+npm run build            # 268ms, 302KB / gzip 94KB (sem novos imports no bundle ainda)
+npm run test             # 3/3 passed em ~1s
+```
+
+**Trade-offs:**
+- Vitest v4 escolhida porque é o que está no npm (plano falava v2). API equivalente; skill funciona.
+- Sanity test no `src/test/` ao invés de co-located: explicitamente é "test do tooling". Em fases reais a convenção é co-located (`Component.test.tsx` ao lado de `Component.tsx`).
+- `--passWithNoTests` mantém o comando verde mesmo enquanto a suíte está vazia/incompleta — mais amigável pra CI da Phase 5.
+- Lint errors pré-existentes ficam para Phase 3 (`QRCodePanel` AbortController) e podem virar config update (`badge.tsx`/`button.tsx` — comum em shadcn, talvez ignore via override).
+
+**Sugestões da IA rejeitadas/alteradas:**
+- Cogitei `vitest-axe` como wrapper para a11y, mas o pacote está em 0.x e desatualizado — substituí por chamada direta ao `axe-core` (documentado em `frontend/CLAUDE.md`).
+- Plano original sugeria criar todos os providers/rotas nesta PR — separei em Phase 2 para PR menor e mais revisável.
+
+**Tempo:** ~25min.
