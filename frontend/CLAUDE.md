@@ -39,7 +39,8 @@ src/
     lead/                       # LeadPanel
     connection/                 # QRCodePanel, ConnectionStatus
   hooks/
-    useConnectionStatus.ts      # re-export do SocketProvider context
+    useConnectionStatus.ts      # merge query+context — {state, qrcode, isLoading}
+    useWhatsAppConnection.ts    # useQuery(/api/whatsapp/connection) com polling 60s
     useConversationsQuery.ts    # useQuery(['conversations', 'list', filters])
     useConversationMessages.ts  # useQuery(['conversations', 'detail', id, 'messages'])
     useLead.ts                  # useQuery(['leads', 'detail', id])

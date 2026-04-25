@@ -12,7 +12,7 @@ import { QueryClientProvider } from '@tanstack/react-query'
 import { act, render, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { conversationKeys, leadKeys } from '@/lib/queryKeys'
+import { conversationKeys, leadKeys, whatsappKeys } from '@/lib/queryKeys'
 import { useSocketContext } from '@/providers/socket-context'
 import { makeTestQueryClient } from '@/test/test-utils'
 import type {
@@ -247,5 +247,21 @@ describe('SocketProvider', () => {
     expect(result.current.waState).toBe('open')
     // qrcode deve ser limpo quando state é 'open'
     expect(result.current.qrcode).toBeNull()
+  })
+
+  it('wa.connection.update escreve {state} no cache de whatsappKeys.connection', () => {
+    const { client, wrapper } = withProviders()
+    render(<div />, { wrapper })
+
+    act(() => {
+      fakeSocket.emit('wa.connection.update', { state: 'open' })
+    })
+
+    expect(client.getQueryData(whatsappKeys.connection())).toEqual({ state: 'open' })
+
+    act(() => {
+      fakeSocket.emit('wa.connection.update', { state: 'close' })
+    })
+    expect(client.getQueryData(whatsappKeys.connection())).toEqual({ state: 'close' })
   })
 })
