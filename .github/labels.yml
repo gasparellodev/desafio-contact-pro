@@ -1,0 +1,31 @@
+# Labels do projeto. Aplicar com:
+#   gh label create -f -F .github/labels.yml
+# Ou via gh CLI individualmente.
+
+- name: feat
+  color: 0E8A16
+  description: Nova funcionalidade
+- name: fix
+  color: D93F0B
+  description: Correção de bug
+- name: chore
+  color: BFD4F2
+  description: Setup, deps, infra
+- name: docs
+  color: 0075CA
+  description: Documentação
+- name: refactor
+  color: FBCA04
+  description: Sem mudança de comportamento
+- name: test
+  color: C2E0C6
+  description: Testes
+- name: priority-1
+  color: B60205
+  description: Obrigatório (Prioridade 1 do desafio)
+- name: priority-2
+  color: D93F0B
+  description: Alta pontuação (Prioridade 2)
+- name: priority-3
+  color: FBCA04
+  description: Diferencial (Prioridade 3)
